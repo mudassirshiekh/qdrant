@@ -67,6 +67,7 @@ impl Points for PointsService {
             request.into_inner(),
             None,
             None,
+            None,
             access,
         )
         .await
@@ -84,6 +85,7 @@ impl Points for PointsService {
         delete(
             StrictModeCheckedTocProvider::new(&self.dispatcher),
             request.into_inner(),
+            None,
             None,
             None,
             access,
@@ -122,6 +124,7 @@ impl Points for PointsService {
             request.into_inner(),
             None,
             None,
+            None,
             access,
         )
         .await
@@ -139,6 +142,7 @@ impl Points for PointsService {
         delete_vectors(
             StrictModeCheckedTocProvider::new(&self.dispatcher),
             request.into_inner(),
+            None,
             None,
             None,
             access,
@@ -160,6 +164,7 @@ impl Points for PointsService {
             request.into_inner(),
             None,
             None,
+            None,
             access,
         )
         .await
@@ -177,6 +182,7 @@ impl Points for PointsService {
         overwrite_payload(
             StrictModeCheckedTocProvider::new(&self.dispatcher),
             request.into_inner(),
+            None,
             None,
             None,
             access,
@@ -198,6 +204,7 @@ impl Points for PointsService {
             request.into_inner(),
             None,
             None,
+            None,
             access,
         )
         .await
@@ -217,6 +224,7 @@ impl Points for PointsService {
             request.into_inner(),
             None,
             None,
+            None,
             access,
         )
         .await
@@ -231,7 +239,15 @@ impl Points for PointsService {
 
         let access = extract_access(&mut request);
 
-        update_batch(&self.dispatcher, request.into_inner(), None, None, access).await
+        update_batch(
+            &self.dispatcher,
+            request.into_inner(),
+            None,
+            None,
+            None,
+            access,
+        )
+        .await
     }
 
     async fn create_field_index(
@@ -245,6 +261,7 @@ impl Points for PointsService {
         create_field_index(
             self.dispatcher.clone(),
             request.into_inner(),
+            None,
             None,
             None,
             access,
@@ -264,6 +281,7 @@ impl Points for PointsService {
         delete_field_index(
             self.dispatcher.clone(),
             request.into_inner(),
+            None,
             None,
             None,
             access,
