@@ -52,11 +52,14 @@ const HEADER_SIZE: usize = 64;
 
 #[derive(Clone, Debug, Default)]
 struct GraphLinksFileInfo {
+    compressed: bool,
+    m: usize,
     point_count: usize,
     reindex_start: usize,
     links_start: usize,
     offsets_start: usize,
     offsets_end: usize,
+    bits_per_additional_link: u8,
 }
 
 #[derive(AsBytes, FromBytes, FromZeroes)]
@@ -67,26 +70,37 @@ struct GraphLinksFileHeader {
     total_links_len: u64,
     total_offsets_len: u64,
     offsets_padding: u64, // 0 or 4
+    m: u64,
 }
 
 impl GraphLinksFileInfo {
     pub fn load(data: &[u8]) -> Option<GraphLinksFileInfo> {
         let header = GraphLinksFileHeader::ref_from_prefix(data)?;
+        let compressed = header.offsets_padding == u64::MAX;
 
         let reindex_start = HEADER_SIZE + header.levels_count as usize * size_of::<u64>();
         let links_start =
             reindex_start + header.point_count as usize * size_of::<PointOffsetType>();
-        let offsets_start = links_start
-            + header.total_links_len as usize * size_of::<PointOffsetType>()
-            + header.offsets_padding as usize;
+        let offsets_start = if compressed {
+            (links_start + header.total_links_len as usize).next_multiple_of(8)
+        } else {
+            links_start
+                + header.total_links_len as usize * size_of::<PointOffsetType>()
+                + header.offsets_padding as usize
+        };
         let offsets_end = offsets_start + header.total_offsets_len as usize * size_of::<u64>();
 
         Some(GraphLinksFileInfo {
+            compressed,
             point_count: header.point_count as usize,
             reindex_start,
             links_start,
             offsets_start,
             offsets_end,
+            m: header.m as usize,
+            bits_per_additional_link: (32
+                - u32::try_from(header.point_count).unwrap().leading_zeros())
+            .max(8) as u8,
         })
     }
 
@@ -112,6 +126,8 @@ impl GraphLinksFileInfo {
 }
 
 pub struct GraphLinksConverter {
+    compressed: bool,
+    m: usize,
     edges: Vec<Vec<Vec<PointOffsetType>>>,
     reindex: Vec<PointOffsetType>,
     back_index: Vec<usize>,
@@ -123,9 +139,11 @@ pub struct GraphLinksConverter {
 }
 
 impl GraphLinksConverter {
-    pub fn new(edges: Vec<Vec<Vec<PointOffsetType>>>, _compressed: bool, _m: usize) -> Self {
+    pub fn new(mut edges: Vec<Vec<Vec<PointOffsetType>>>, compressed: bool, m: usize) -> Self {
         if edges.is_empty() {
             return Self {
+                compressed,
+                m,
                 edges,
                 reindex: Vec::new(),
                 back_index: Vec::new(),
@@ -155,9 +173,31 @@ impl GraphLinksConverter {
 
         // estimate size of `links` and `offsets`
         let mut total_links_len = 0;
-        for point in edges.iter() {
+        let bits_per_additional_link =
+            (32 - u32::try_from(edges.len()).unwrap().leading_zeros()).max(8);
+        for point in edges.iter_mut() {
             point_count_by_level[point.len() - 1] += 1;
-            total_links_len += point.iter().map(Vec::len).sum::<usize>();
+            for (layer_no, layer) in point.iter_mut().enumerate() {
+                if !compressed {
+                    total_links_len += layer.len() * size_of::<PointOffsetType>();
+                } else {
+                    let mp = layer.len().min(if layer_no == 0 { m * 2 } else { m });
+
+                    layer[..mp].sort_unstable();
+                    for i in (1..mp).rev() {
+                        layer[i] -= layer[i - 1];
+                    }
+
+                    let mut total_bits = 0;
+                    if mp != 0 {
+                        let bits = 8.max(32 - layer.iter().take(mp).max().unwrap().leading_zeros());
+                        total_bits += 5 + bits as usize * mp;
+                    }
+                    total_bits +=
+                        bits_per_additional_link as usize * layer.len().saturating_sub(mp);
+                    total_links_len += total_bits.next_multiple_of(8) / 8;
+                }
+            }
         }
 
         let mut total_offsets_len = 0;
@@ -171,6 +211,8 @@ impl GraphLinksConverter {
         total_offsets_len += 1;
 
         Self {
+            compressed,
+            m,
             edges,
             reindex,
             back_index,
@@ -187,13 +229,14 @@ impl GraphLinksConverter {
         HEADER_SIZE
             + self.point_count_by_level.len() * size_of::<u64>()
             + self.reindex.len() * size_of::<PointOffsetType>()
-            + self.total_links_len * size_of::<PointOffsetType>()
+            + self.total_links_len
             + self.offsets_padding()
             + self.total_offsets_len * size_of::<u64>()
     }
 
     fn offsets_padding(&self) -> usize {
-        (self.total_links_len + self.reindex.len()) % 2 * size_of::<u32>()
+        let x = self.total_links_len + 4 * self.reindex.len();
+        (8 - x % 8) % 8
     }
 
     fn serialize_to_vec(&self) -> Vec<u8> {
@@ -209,9 +252,18 @@ impl GraphLinksConverter {
         let header = GraphLinksFileHeader {
             point_count: self.reindex.len() as u64,
             levels_count: self.point_count_by_level.len() as u64,
-            total_links_len: self.total_links_len as u64,
+            total_links_len: if self.compressed {
+                self.total_links_len as u64
+            } else {
+                self.total_links_len as u64 / size_of::<PointOffsetType>() as u64
+            },
             total_offsets_len: self.total_offsets_len as u64,
-            offsets_padding: self.offsets_padding() as u64,
+            offsets_padding: if self.compressed {
+                u64::MAX
+            } else {
+                self.offsets_padding() as u64
+            },
+            m: if self.compressed { self.m as u64 } else { 0 },
         };
 
         // 1. header
@@ -231,23 +283,58 @@ impl GraphLinksConverter {
 
         // 5. links
         let mut links_pos = 0;
-        let mut write_links = |links: &[PointOffsetType]| {
-            writer.write_all(links.as_bytes())?;
-            links_pos += links.len();
-            offsets.push(links_pos as u64);
+        let mut links_tmp_packed = Vec::new();
+        let bits_per_additional_link =
+            (32 - u32::try_from(self.edges.len()).unwrap().leading_zeros()).max(8);
+        let mut write_links = |links: &[PointOffsetType], m: usize| {
+            if links.is_empty() {
+                offsets.push(links_pos as u64);
+                return Ok(());
+            }
+
+            if self.compressed {
+                let mut packer = common::bitpacking::BitPacker::new(&mut links_tmp_packed);
+
+                let bits = 8.max(32 - links.iter().take(m).max().unwrap().leading_zeros());
+                packer.push(bits - 8, 5);
+                for &value in links.iter().take(m) {
+                    packer.push(value, bits as u8);
+                }
+                for &value in links.iter().skip(m) {
+                    packer.push(value, bits_per_additional_link as u8);
+                }
+                packer.finish();
+
+                writer.write_all(&links_tmp_packed)?;
+                links_pos += links_tmp_packed.len();
+
+                offsets.push(links_pos as u64);
+            } else {
+                writer.write_all(links.as_bytes())?;
+
+                links_pos += links.len();
+                offsets.push(links_pos as u64);
+            };
             std::io::Result::Ok(())
         };
         for point in &self.edges {
-            write_links(&point[0])?;
+            write_links(&point[0], self.m * 2)?;
         }
         for level in 1..header.levels_count as usize {
             let count = self.point_count_by_level.iter().skip(level).sum::<u64>() as usize;
             for i in 0..count {
-                write_links(&self.edges[self.back_index[i]][level])?;
+                write_links(&self.edges[self.back_index[i]][level], self.m)?;
             }
         }
 
-        debug_assert_eq!(links_pos, self.total_links_len);
+        if self.compressed {
+            debug_assert_eq!(links_pos, self.total_links_len);
+        } else {
+            debug_assert_eq!(
+                links_pos * size_of::<PointOffsetType>(),
+                self.total_links_len,
+            );
+        }
 
         // 6. padding for offsets
         writer.write_zeros(self.offsets_padding())?;
@@ -447,9 +534,50 @@ impl<'a> GraphLinksView<'a> {
         } else {
             self.level_offsets[level] as usize + self.reindex(point_id) as usize
         };
-        let links_range = self.get_links_range(idx);
-        for &link in self.get_links(links_range) {
-            f(link);
+        let all_links = &self.data[self.info.links_range()];
+
+        let offsets = u64::slice_from(&self.data[self.info.offsets_range()]).unwrap();
+        let offset0 = offsets[idx];
+        let offset1 = offsets[idx + 1];
+
+        let links_range = (offset0 as usize)..(offset1 as usize);
+
+        if self.info.compressed {
+            if links_range.is_empty() {
+                return;
+            }
+
+            let mut unpacker =
+                common::bitpacking::BitUnpacker::new(&all_links[links_range.clone()]);
+
+            unpacker.set_bits(5);
+            let bits_per_value = unpacker.read() + 8;
+            unpacker.set_bits(bits_per_value as u8);
+            let value_count =
+                ((links_range.len() * 8 - 5) / bits_per_value as usize).min(if level == 0 {
+                    self.info.m * 2
+                } else {
+                    self.info.m
+                });
+
+            let mut value = 0;
+            for _ in 0..value_count {
+                value += unpacker.read();
+                f(value);
+            }
+
+            let additional_links_count =
+                (links_range.len() * 8 - 5 - bits_per_value as usize * value_count)
+                    / self.info.bits_per_additional_link as usize;
+            unpacker.set_bits(self.info.bits_per_additional_link);
+            for _ in 0..additional_links_count {
+                f(unpacker.read());
+            }
+        } else {
+            let all_links = PointOffsetType::slice_from(all_links).unwrap();
+            for &link in &all_links[links_range] {
+                f(link);
+            }
         }
     }
 
@@ -486,22 +614,9 @@ impl<'a> GraphLinksView<'a> {
         }
     }
 
-    fn get_links_range(&self, idx: usize) -> Range<usize> {
-        let offsets = u64::slice_from(&self.data[self.info.offsets_range()]).unwrap();
-        offsets[idx] as usize..offsets[idx + 1] as usize
-    }
-
     fn reindex(&self, point_id: PointOffsetType) -> PointOffsetType {
         let idx = &self.data[self.info.reindex_range()];
         PointOffsetType::slice_from(idx).unwrap()[point_id as usize]
-    }
-
-    fn get_links(&self, range: Range<usize>) -> &'a [PointOffsetType] {
-        let idx = &self.data[self.info.links_range()];
-        PointOffsetType::slice_from(idx)
-            .unwrap()
-            .get(range)
-            .unwrap()
     }
 }
 
