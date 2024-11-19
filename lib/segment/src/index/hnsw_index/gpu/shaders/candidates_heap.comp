@@ -9,7 +9,7 @@ uint candidates_count;
 #define BHEAP_NAME candidates_heap
 #define BHEAP_DATA candidates
 #define BHEAP_TYPE ScoredPoint
-#define BHEAP_CMP(a, b) a.score > b.score
+#define BHEAP_CMP(a, b) a.score < b.score
 #include "bheap.comp"
 
 void candidates_heap_init() {
@@ -22,37 +22,42 @@ ScoredPoint pop_candidate() {
         return ScoredPoint(0, 0.0);
     }
 
-    ScoredPoint scored_point = ScoredPoint(0, 0.0);
-    if (gl_SubgroupInvocationID == 0) {
-        scored_point = BHEAP(candidates_heap, pop)();
+    ScoredPoint max_scored_point = ScoredPoint(0, negative_infinity);
+    uint max_index = 0;
+    for (uint i = gl_SubgroupInvocationID; i < candidates_count; i += SUBGROUP_SIZE) {
+        if (candidates[i].score > max_scored_point.score) {
+            max_scored_point = candidates[i];
+            max_index = i;
+        }
     }
+
+    float subgroup_largest = subgroupMax(max_scored_point.score);
+    bool is_max_thread = max_scored_point.score == subgroup_largest;
+    uvec4 subgroup_max_threads = subgroupBallot(is_max_thread);
+    uint subgroup_max_thread = subgroupBallotFindLSB(subgroup_max_threads);
+    max_index = subgroupShuffle(max_index, subgroup_max_thread);
+
+    ScoredPoint popped_value = ScoredPoint(0, 0.0);
+    BHEAP(candidates_heap, size)--;
     candidates_count--;
+    if (gl_SubgroupInvocationID == 0) {
+        popped_value = candidates[max_index];
+        candidates[max_index] = candidates[candidates_count];
+        BHEAP(candidates_heap, sift_up)(max_index);
+    }
+
     return ScoredPoint(
-        subgroupBroadcast(scored_point.id, 0),
-        subgroupBroadcast(scored_point.score, 0)
+        subgroupBroadcast(popped_value.id, 0),
+        subgroupBroadcast(popped_value.score, 0)
     );
 }
 
 bool push_candidate(ScoredPoint scored_point) {
     if (candidates_count == CANDIDATES_HEAP_CAPACITY) {
-        ScoredPoint min_scored_point = ScoredPoint(0, positive_infinity);
-        uint min_index = 0;
-        for (uint i = gl_SubgroupInvocationID; i < candidates_count; i += SUBGROUP_SIZE) {
-            if (candidates[i].score < min_scored_point.score) {
-                min_scored_point = candidates[i];
-                min_index = i;
+        if (scored_point.score > BHEAP(candidates_heap, top)().score) {
+            if (subgroupElect()) {
+                BHEAP(candidates_heap, change_top)(scored_point);
             }
-        }
-
-        float subgroup_smallest = subgroupMin(min_scored_point.score);
-        bool is_min_thread = min_scored_point.score == subgroup_smallest;
-        uvec4 subgroup_min_threads = subgroupBallot(is_min_thread);
-        uint subgroup_min_thread = subgroupBallotFindLSB(subgroup_min_threads);
-        min_index = subgroupShuffle(min_index, subgroup_min_thread);
-        
-        if (subgroupElect()) {
-            candidates[min_index] = scored_point;
-            BHEAP(candidates_heap, sift_up)(min_index);
         }
     } else {
         if (subgroupElect()) {
