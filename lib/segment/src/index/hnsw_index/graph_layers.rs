@@ -273,6 +273,7 @@ mod tests {
     use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rstest::rstest;
     use tempfile::Builder;
 
     use super::*;
@@ -304,8 +305,10 @@ mod tests {
 
     const M: usize = 8;
 
-    #[test]
-    fn test_search_on_level() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_search_on_level(#[case] compressed: bool) {
         let dim = 8;
         let m = 8;
         let ef_construct = 32;
@@ -324,8 +327,12 @@ mod tests {
             m,
             m0: 2 * m,
             ef_construct,
-            links: GraphLinksRam::from_converter(GraphLinksConverter::new(graph_links.clone()))
-                .unwrap(),
+            links: GraphLinksRam::from_converter(GraphLinksConverter::new(
+                graph_links.clone(),
+                compressed,
+                m,
+            ))
+            .unwrap(),
             entry_points: EntryPoints::new(entry_points_num),
             visited_pool: VisitedPool::new(),
         };
@@ -363,8 +370,10 @@ mod tests {
         raw_scorer.take_hardware_counter().discard_results();
     }
 
-    #[test]
-    fn test_save_and_load() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_save_and_load(#[case] compressed: bool) {
         let num_vectors = 100;
         let dim = 8;
         let top = 5;
@@ -377,6 +386,7 @@ mod tests {
             num_vectors,
             M,
             dim,
+            compressed,
             false,
             &mut rng,
             Some(&links_path),
@@ -396,8 +406,10 @@ mod tests {
         assert_eq!(res1, res2)
     }
 
-    #[test]
-    fn test_add_points() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_add_points(#[case] compressed: bool) {
         let num_vectors = 1000;
         let dim = 8;
 
@@ -405,8 +417,15 @@ mod tests {
 
         type M = CosineMetric;
 
-        let (vector_holder, graph_layers) =
-            create_graph_layer_fixture::<M, _>(num_vectors, M, dim, false, &mut rng, None);
+        let (vector_holder, graph_layers) = create_graph_layer_fixture::<M, _>(
+            num_vectors,
+            M,
+            dim,
+            compressed,
+            false,
+            &mut rng,
+            None,
+        );
 
         let main_entry = graph_layers
             .entry_points
@@ -447,9 +466,10 @@ mod tests {
         assert_eq!(reference_top.into_vec(), graph_search);
     }
 
-    #[test]
-    #[ignore]
-    fn test_draw_hnsw_graph() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_draw_hnsw_graph(#[case] compressed: bool) {
         let dim = 2;
         let num_vectors = 500;
 
@@ -459,6 +479,7 @@ mod tests {
             num_vectors,
             M,
             dim,
+            compressed,
             true,
             &mut rng,
             None,

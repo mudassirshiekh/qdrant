@@ -78,6 +78,8 @@ impl GraphLayersBuilder {
     pub fn into_graph_layers<TGraphLinks: GraphLinks>(
         self,
         path: Option<&Path>,
+        compressed: bool,
+        m: usize,
     ) -> OperationResult<GraphLayers<TGraphLinks>> {
         let unlocker_links_layers = self
             .links_layers
@@ -85,7 +87,7 @@ impl GraphLayersBuilder {
             .map(|l| l.into_iter().map(|l| l.into_inner()).collect())
             .collect();
 
-        let mut links_converter = GraphLinksConverter::new(unlocker_links_layers);
+        let mut links_converter = GraphLinksConverter::new(unlocker_links_layers, compressed, m);
         if let Some(path) = path {
             links_converter.save_as(path)?;
         }
@@ -485,13 +487,14 @@ mod tests {
     use rand::prelude::StdRng;
     use rand::seq::SliceRandom;
     use rand::SeedableRng;
+    use rstest::rstest;
 
     use super::*;
     use crate::data_types::vectors::{DenseVector, VectorElementType};
     use crate::fixtures::index_fixtures::{
         random_vector, FakeFilterContext, TestRawScorerProducer,
     };
-    use crate::index::hnsw_index::graph_links::GraphLinksRam;
+    use crate::index::hnsw_index::graph_links::{normalize_links, GraphLinksRam};
     use crate::index::hnsw_index::tests::create_graph_layer_fixture;
     use crate::spaces::metric::Metric;
     use crate::spaces::simple::{CosineMetric, EuclidMetric};
@@ -593,8 +596,10 @@ mod tests {
     }
 
     #[cfg(not(windows))] // https://github.com/qdrant/qdrant/issues/1452
-    #[test]
-    fn test_parallel_graph_build() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_parallel_graph_build(#[case] compressed: bool) {
         let num_vectors = 1000;
         let dim = 8;
 
@@ -649,7 +654,7 @@ mod tests {
         }
 
         let graph = graph_layers_builder
-            .into_graph_layers::<GraphLinksRam>(None)
+            .into_graph_layers::<GraphLinksRam>(None, compressed, M)
             .unwrap();
 
         let fake_filter_context = FakeFilterContext {};
@@ -662,8 +667,10 @@ mod tests {
         assert_eq!(reference_top.into_vec(), graph_search);
     }
 
-    #[test]
-    fn test_add_points() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_add_points(#[case] compressed: bool) {
         let num_vectors = 1000;
         let dim = 8;
 
@@ -675,8 +682,15 @@ mod tests {
         let (vector_holder, graph_layers_builder) =
             create_graph_layer::<M, _>(num_vectors, dim, false, &mut rng);
 
-        let (_vector_holder_orig, graph_layers_orig) =
-            create_graph_layer_fixture::<M, _>(num_vectors, M, dim, false, &mut rng2, None);
+        let (_vector_holder_orig, graph_layers_orig) = create_graph_layer_fixture::<M, _>(
+            num_vectors,
+            M,
+            dim,
+            compressed,
+            false,
+            &mut rng2,
+            None,
+        );
 
         // check is graph_layers_builder links are equal to graph_layers_orig
         let orig_len = graph_layers_orig.links.num_points();
@@ -691,7 +705,11 @@ mod tests {
                 .collect_vec();
             let links_builder = graph_layers_builder.links_layers[idx][0].read();
             let link_container_from_builder = links_builder.iter().copied().collect::<Vec<_>>();
-            assert_eq!(links_orig, &link_container_from_builder);
+            let m = if compressed { M * 2 } else { 0 };
+            assert_eq!(
+                normalize_links(m, links_orig.clone()),
+                normalize_links(m, link_container_from_builder),
+            );
         }
 
         let main_entry = graph_layers_builder
@@ -736,7 +754,7 @@ mod tests {
         }
 
         let graph = graph_layers_builder
-            .into_graph_layers::<GraphLinksRam>(None)
+            .into_graph_layers::<GraphLinksRam>(None, compressed, M)
             .unwrap();
 
         let fake_filter_context = FakeFilterContext {};
@@ -748,9 +766,10 @@ mod tests {
         assert_eq!(reference_top.into_vec(), graph_search);
     }
 
-    #[test]
-    #[ignore]
-    fn test_hnsw_graph_properties() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_hnsw_graph_properties(#[case] compressed: bool) {
         const NUM_VECTORS: usize = 5_000;
         const DIM: usize = 16;
         const M: usize = 16;
@@ -773,7 +792,7 @@ mod tests {
             raw_scorer.take_hardware_counter().discard_results();
         }
         let graph_layers = graph_layers_builder
-            .into_graph_layers::<GraphLinksRam>(None)
+            .into_graph_layers::<GraphLinksRam>(None, compressed, M)
             .unwrap();
 
         let num_points = graph_layers.links.num_points();

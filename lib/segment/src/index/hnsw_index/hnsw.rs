@@ -412,8 +412,13 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
         config.indexed_vector_count.replace(indexed_vectors);
 
         let graph_links_path = GraphLayers::<TGraphLinks>::get_links_path(path);
-        let graph: GraphLayers<TGraphLinks> =
-            graph_layers_builder.into_graph_layers(Some(&graph_links_path))?;
+        let use_compression =
+            std::env::var_os("__QDRANT_COMPRESSED_LINKS").map_or(false, |x| !x.is_empty());
+        let graph: GraphLayers<TGraphLinks> = graph_layers_builder.into_graph_layers(
+            Some(&graph_links_path),
+            use_compression,
+            hnsw_config.m,
+        )?;
 
         #[cfg(debug_assertions)]
         {

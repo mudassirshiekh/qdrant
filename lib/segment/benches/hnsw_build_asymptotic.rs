@@ -42,7 +42,9 @@ fn build_index<TMetric: Metric<VectorElementType>>(
     }
     (
         vector_holder,
-        graph_layers_builder.into_graph_layers(None).unwrap(),
+        graph_layers_builder
+            .into_graph_layers(None, false, M)
+            .unwrap(),
     )
 }
 
