@@ -343,6 +343,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                         false,
                         ids,
                         points_scorer_builder,
+                        stopped,
                     ))
                 } else {
                     None
@@ -581,6 +582,7 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                     false,
                     points_to_index.clone(),
                     points_scorer_builder,
+                    stopped,
                 ))
             } else {
                 None

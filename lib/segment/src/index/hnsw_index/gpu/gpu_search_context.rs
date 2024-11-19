@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use common::types::{PointOffsetType, ScoredPointOffset};
@@ -117,6 +118,7 @@ impl GpuSearchContext {
         max_patched_points: usize,
         force_half_precision: bool,
         exact: bool,
+        stopped: &AtomicBool,
     ) -> OperationResult<Self> {
         let points_count = vector_storage.total_vector_count();
         let search_context_params = GpuSearchContextParams { exact };
@@ -126,6 +128,7 @@ impl GpuSearchContext {
             vector_storage,
             quantized_storage,
             force_half_precision,
+            stopped,
         )?;
         let gpu_links = GpuLinks::new(device.clone(), m, m0, points_count, max_patched_points)?;
 
@@ -860,6 +863,7 @@ mod tests {
             num_vectors,
             false,
             true,
+            &false.into(),
         )
         .unwrap();
 

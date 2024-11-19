@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -36,6 +36,7 @@ pub fn build_hnsw_on_gpu<'a>(
             -> OperationResult<(Box<dyn RawScorer + 'a>, Option<Box<dyn FilterContext + 'a>>)>
         + Send
         + Sync,
+    stopped: &AtomicBool,
 ) -> OperationResult<GraphLayersBuilder> {
     let num_vectors = reference_graph.links_layers.len();
     let m = reference_graph.m;
@@ -53,6 +54,7 @@ pub fn build_hnsw_on_gpu<'a>(
         num_vectors,
         force_half_precision,
         exact,
+        stopped,
     )?));
 
     let batched_points = Arc::new(BatchedPoints::new(
@@ -227,6 +229,7 @@ mod tests {
                     .unwrap();
                 Ok((raw_scorer, Some(Box::new(fake_filter_context))))
             },
+            &false.into(),
         )
         .unwrap()
     }

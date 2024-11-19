@@ -568,6 +568,7 @@ fn test_gpu_vector_storage_impl(
         &storage,
         quantized_vectors.as_ref(),
         force_half_precision,
+        &false.into(),
     )
     .unwrap();
 
