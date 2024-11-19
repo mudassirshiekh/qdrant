@@ -24,7 +24,8 @@ ScoredPoint pop_candidate() {
 
     ScoredPoint max_scored_point = ScoredPoint(0, negative_infinity);
     uint max_index = 0;
-    for (uint i = gl_SubgroupInvocationID; i < candidates_count; i += SUBGROUP_SIZE) {
+    uint scan_start = (candidates_count - 1) / 2;
+    for (uint i = scan_start + gl_SubgroupInvocationID; i < candidates_count; i += SUBGROUP_SIZE) {
         if (candidates[i].score > max_scored_point.score) {
             max_scored_point = candidates[i];
             max_index = i;
