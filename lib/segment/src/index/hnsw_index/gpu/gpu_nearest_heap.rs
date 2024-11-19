@@ -11,10 +11,16 @@ pub struct GpuNearestHeap {
 
 impl ShaderBuilderParameters for GpuNearestHeap {
     fn shader_includes(&self) -> HashMap<String, String> {
-        HashMap::from([(
-            "nearest_heap.comp".to_string(),
-            include_str!("shaders/nearest_heap.comp").to_string(),
-        )])
+        HashMap::from([
+            (
+                "nearest_heap.comp".to_string(),
+                include_str!("shaders/nearest_heap.comp").to_string(),
+            ),
+            (
+                "bheap.comp".to_string(),
+                include_str!("shaders/bheap.comp").to_string(),
+            ),
+        ])
     }
 
     fn shader_defines(&self) -> HashMap<String, Option<String>> {

@@ -12,7 +12,7 @@ float heap_data[8]; // reserve storage for binary heap
 #include "bheap.comp" // define all binary tree functions
 
 Step 2: init
-BHEAP(BHEAP_NAME, init)(0.0, 8, 0); // default value, capacity and offset in storage
+BHEAP(BHEAP_NAME, init)(8, 0); // capacity and offset in storage
 
 Step 3: usage
 BHEAP(BHEAP_NAME, capacity) // get capacity
@@ -66,15 +66,19 @@ void BHEAP(BHEAP_NAME, sift_down)(uint i) {
     }
 }
 
+void BHEAP(BHEAP_NAME, sift_up)(uint i) {
+    while (i > 0 && BHEAP(BHEAP_NAME, cmp)(i, (i - 1) / 2)) {
+        BHEAP(BHEAP_NAME, swap)(i, (i - 1) / 2);
+        i = (i - 1) / 2;
+    }
+}
+
 // push
 void BHEAP(BHEAP_NAME, push)(BHEAP_TYPE score) {
     uint i = BHEAP(BHEAP_NAME, size);
     BHEAP(BHEAP_NAME, size)++;
     BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + i] = score;
-    while (i > 0 && BHEAP(BHEAP_NAME, cmp)(i, (i - 1) / 2)) {
-        BHEAP(BHEAP_NAME, swap)(i, (i - 1) / 2);
-        i = (i - 1) / 2;
-    }
+    BHEAP(BHEAP_NAME, sift_up)(i);
 }
 
 // get top value
@@ -109,12 +113,10 @@ uint BHEAP(BHEAP_NAME, into_array)() {
 }
 
 // init
-void BHEAP(BHEAP_NAME, init)(BHEAP_TYPE none_value, uint capacity, uint offset) {
+void BHEAP(BHEAP_NAME, init)(uint capacity, uint offset) {
     BHEAP(BHEAP_NAME, offset) = offset;
     BHEAP(BHEAP_NAME, capacity) = capacity;
-    //for (uint i = 0; i < capacity; i++) {
-    //    BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + i] = none_value;
-    //}
+    BHEAP(BHEAP_NAME, size) = 0;
 }
 
 #undef BHEAP_NAME

@@ -20,10 +20,16 @@ impl GpuCandidatesHeap {
 
 impl ShaderBuilderParameters for GpuCandidatesHeap {
     fn shader_includes(&self) -> HashMap<String, String> {
-        HashMap::from([(
-            "candidates_heap.comp".to_string(),
-            include_str!("shaders/candidates_heap.comp").to_string(),
-        )])
+        HashMap::from([
+            (
+                "candidates_heap.comp".to_string(),
+                include_str!("shaders/candidates_heap.comp").to_string(),
+            ),
+            (
+                "bheap.comp".to_string(),
+                include_str!("shaders/bheap.comp").to_string(),
+            ),
+        ])
     }
 
     fn shader_defines(&self) -> HashMap<String, Option<String>> {

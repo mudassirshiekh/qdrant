@@ -9,7 +9,7 @@
 #include "visited_flags.comp"
 
 void process_candidate(ScoredPoint scored_point) {
-    bool not_presented = nearest_smaller.id != scored_point.id;
+    bool not_presented = BHEAP(nearest_heap, top)().id != scored_point.id;
     bool was_added = push_nearest(scored_point);
     if (was_added && not_presented) {
         push_candidate(scored_point);
@@ -89,7 +89,7 @@ uint search(POINT_ID point_id, ScoredPoint entry) {
     
     while (candidates_count > 0) {
         ScoredPoint candidate = pop_candidate();
-        if (candidate.score < nearest_smaller.score) {
+        if (candidate.score < BHEAP(nearest_heap, top)().score) {
             continue;
         }
         process_candidate(candidate.id);
@@ -97,7 +97,7 @@ uint search(POINT_ID point_id, ScoredPoint entry) {
 
     process_candidate(point_id);
 
-    sort_nearest();
+    BHEAP(nearest_heap, into_array)();
     return nearest_count;
 }
 

@@ -6,11 +6,15 @@
 shared ScoredPoint candidates[CANDIDATES_HEAP_CAPACITY];
 uint candidates_count;
 
+#define BHEAP_NAME candidates_heap
+#define BHEAP_DATA candidates
+#define BHEAP_TYPE ScoredPoint
+#define BHEAP_CMP(a, b) a.score > b.score
+#include "bheap.comp"
+
 void candidates_heap_init() {
     candidates_count = 0;
-    for (uint i = gl_SubgroupInvocationID; i < CANDIDATES_HEAP_CAPACITY; i += SUBGROUP_SIZE) {
-        candidates[i] = ScoredPoint(0, positive_infinity);
-    }
+    BHEAP(candidates_heap, init)(CANDIDATES_HEAP_CAPACITY, 0);
 }
 
 ScoredPoint pop_candidate() {
@@ -18,29 +22,15 @@ ScoredPoint pop_candidate() {
         return ScoredPoint(0, 0.0);
     }
 
-    ScoredPoint max_scored_point = ScoredPoint(0, negative_infinity);
-    uint max_index = 0;
-    for (uint i = gl_SubgroupInvocationID; i < candidates_count; i += SUBGROUP_SIZE) {
-        if (candidates[i].score > max_scored_point.score) {
-            max_scored_point = candidates[i];
-            max_index = i;
-        }
+    ScoredPoint scored_point = ScoredPoint(0, 0.0);
+    if (gl_SubgroupInvocationID == 0) {
+        scored_point = BHEAP(candidates_heap, pop)();
     }
-
     candidates_count--;
-
-    float subgroup_largest = subgroupMax(max_scored_point.score);
-    bool is_max_thread = max_scored_point.score == subgroup_largest;
-    uvec4 subgroup_max_threads = subgroupBallot(is_max_thread);
-    uint subgroup_max_thread = subgroupBallotFindLSB(subgroup_max_threads);
-    max_index = subgroupShuffle(max_index, subgroup_max_thread);
-    max_scored_point.score = subgroupShuffle(max_scored_point.score, subgroup_max_thread);
-    max_scored_point.id = subgroupShuffle(max_scored_point.id, subgroup_max_thread);
-
-    if (subgroupElect()) {
-        candidates[max_index] = candidates[candidates_count];
-    }
-    return max_scored_point;
+    return ScoredPoint(
+        subgroupBroadcast(scored_point.id, 0),
+        subgroupBroadcast(scored_point.score, 0)
+    );
 }
 
 bool push_candidate(ScoredPoint scored_point) {
@@ -62,10 +52,11 @@ bool push_candidate(ScoredPoint scored_point) {
         
         if (subgroupElect()) {
             candidates[min_index] = scored_point;
+            BHEAP(candidates_heap, sift_up)(min_index);
         }
     } else {
         if (subgroupElect()) {
-            candidates[candidates_count] = scored_point;
+            BHEAP(candidates_heap, push)(scored_point);
         }
         candidates_count++;
     }
