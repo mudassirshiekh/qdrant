@@ -1,7 +1,12 @@
 #ifndef SEARCH_CONTEXT_HEADER
 #define SEARCH_CONTEXT_HEADER
 
+#define BHEAP_CAPACITY NEAREST_HEAP_CAPACITY + CANDIDATES_HEAP_CAPACITY
+#define NEAREST_HEAP_OFFSET 0
+#define CANDIDATES_HEAP_OFFSET NEAREST_HEAP_CAPACITY
+
 #include "common.comp"
+#include "bheap.comp"
 #include "vector_storage.comp"
 #include "links.comp"
 #include "nearest_heap.comp"
@@ -9,7 +14,7 @@
 #include "visited_flags.comp"
 
 void process_candidate(ScoredPoint scored_point) {
-    bool not_presented = BHEAP(nearest_heap, top)().id != scored_point.id;
+    bool not_presented = bheap_top(NEAREST_HEAP_OFFSET).id != scored_point.id;
     bool was_added = push_nearest(scored_point);
     if (was_added && not_presented) {
         push_candidate(scored_point);
@@ -89,7 +94,7 @@ uint search(POINT_ID point_id, ScoredPoint entry) {
     
     while (candidates_count > 0) {
         ScoredPoint candidate = pop_candidate();
-        if (candidate.score < BHEAP(nearest_heap, top)().score) {
+        if (candidate.score < bheap_top(NEAREST_HEAP_OFFSET).score) {
             continue;
         }
         process_candidate(candidate.id);
@@ -97,7 +102,9 @@ uint search(POINT_ID point_id, ScoredPoint entry) {
 
     process_candidate(point_id);
 
-    BHEAP(nearest_heap, into_array)();
+    if (subgroupElect()) {
+        bheap_into_array(NEAREST_HEAP_OFFSET, nearest_count);
+    }
     return nearest_count;
 }
 

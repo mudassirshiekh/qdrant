@@ -26,100 +26,87 @@ BHEAP(BHEAP_NAME, into_array)(); // convert to sorted array and return array siz
 
 ******/
 
+#ifndef BHEAP_HEADER
+#define BHEAP_HEADER
+
 #include "common.comp"
 
-#define BHEAP(NAME, a) CONCAT(NAME, a)
-
-uint BHEAP(BHEAP_NAME, offset) = 0;
-uint BHEAP(BHEAP_NAME, capacity) = 0;
-uint BHEAP(BHEAP_NAME, size) = 0;
+shared ScoredPoint bheap[BHEAP_CAPACITY];
 
 // swap
-void BHEAP(BHEAP_NAME, swap)(uint i, uint j) {
-    BHEAP_TYPE tmp = BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + i];
-    BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + i] = BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + j];
-    BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + j] = tmp;
+void bheap_swap(uint offset, uint i, uint j) {
+    ScoredPoint tmp = bheap[offset + i];
+    bheap[offset + i] = bheap[offset + j];
+    bheap[offset + j] = tmp;
 }
 
 // compare, call BHEAP_CMP function
-bool BHEAP(BHEAP_NAME, cmp)(uint i, uint j) {
-    return BHEAP_CMP(
-        (BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + i]),
-        (BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + j])
-    );
+bool bheap_cmp(uint offset, uint i, uint j) {
+    return bheap[offset + i].score < bheap[offset + j].score;
 }
 
 // sift down
-void BHEAP(BHEAP_NAME, sift_down)(uint i) {
-    while (2 * i + 1 < BHEAP(BHEAP_NAME, size)) {
+void bheap_sift_down(uint offset, uint size, uint i) {
+    while (2 * i + 1 < size) {
         uint left = 2 * i + 1;
         uint right = 2 * i + 2;
         uint j = left;
-        if (right < BHEAP(BHEAP_NAME, size) && BHEAP(BHEAP_NAME, cmp)(right, left)) {
+        if (right < size && bheap_cmp(offset, right, left)) {
             j = right;
         }
-        if (BHEAP(BHEAP_NAME, cmp)(i, j)) {
+        if (bheap_cmp(offset, i, j)) {
             break;
         }
-        BHEAP(BHEAP_NAME, swap)(i, j);
+        bheap_swap(offset, i, j);
         i = j;
     }
 }
 
-void BHEAP(BHEAP_NAME, sift_up)(uint i) {
-    while (i > 0 && BHEAP(BHEAP_NAME, cmp)(i, (i - 1) / 2)) {
-        BHEAP(BHEAP_NAME, swap)(i, (i - 1) / 2);
+void bheap_sift_up(uint offset, uint i) {
+    while (i > 0 && bheap_cmp(offset, i, (i - 1) / 2)) {
+        bheap_swap(offset, i, (i - 1) / 2);
         i = (i - 1) / 2;
     }
 }
 
 // push
-void BHEAP(BHEAP_NAME, push)(BHEAP_TYPE score) {
-    uint i = BHEAP(BHEAP_NAME, size);
-    BHEAP(BHEAP_NAME, size)++;
-    BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + i] = score;
-    BHEAP(BHEAP_NAME, sift_up)(i);
+bool bheap_push(uint offset, uint size, uint capacity, ScoredPoint score) {
+    uint i = size;
+    bheap[offset + i] = score;
+    bheap_sift_up(offset, i);
+    return true;
 }
 
 // get top value
-BHEAP_TYPE BHEAP(BHEAP_NAME, top)() {
-    return BHEAP_DATA[BHEAP(BHEAP_NAME, offset)];
+ScoredPoint bheap_top(uint offset) {
+    return bheap[offset];
 }
 
 // pop value
-BHEAP_TYPE BHEAP(BHEAP_NAME, pop)() {
-    BHEAP_TYPE top_value = BHEAP(BHEAP_NAME, top)();
-    BHEAP(BHEAP_NAME, size)--;
-    BHEAP_DATA[BHEAP(BHEAP_NAME, offset)] = BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + BHEAP(BHEAP_NAME, size)];
-    BHEAP(BHEAP_NAME, sift_down)(0);
+ScoredPoint bheap_pop(uint offset, uint size) {
+    ScoredPoint top_value = bheap_top(offset);
+    size--;
+    bheap[offset] = bheap[offset + size];
+    bheap_sift_down(offset, size, 0);
     return top_value;
 }
 
 // replace top value
-void BHEAP(BHEAP_NAME, change_top)(BHEAP_TYPE new_value) {
-    BHEAP_DATA[BHEAP(BHEAP_NAME, offset)] = new_value;
-    BHEAP(BHEAP_NAME, sift_down)(0);
+void bheap_change_top(uint offset, uint size, ScoredPoint new_value) {
+    bheap[offset] = new_value;
+    bheap_sift_down(offset, size, 0);
 }
 
 // into_array
-uint BHEAP(BHEAP_NAME, into_array)() {
-    uint array_size = BHEAP(BHEAP_NAME, size);
-    while (BHEAP(BHEAP_NAME, size) > 0) {
-        uint i = BHEAP(BHEAP_NAME, size) - 1;
-        BHEAP_TYPE value = BHEAP(BHEAP_NAME, pop)();
-        BHEAP_DATA[BHEAP(BHEAP_NAME, offset) + i] = value;
+uint bheap_into_array(uint offset, uint size) {
+    uint array_size = size;
+    while (size > 0) {
+        uint i = size - 1;
+        ScoredPoint value = bheap_pop(offset, size);
+        size--;
+        bheap[offset + i] = value;
     }
     return array_size;
 }
 
-// init
-void BHEAP(BHEAP_NAME, init)(uint capacity, uint offset) {
-    BHEAP(BHEAP_NAME, offset) = offset;
-    BHEAP(BHEAP_NAME, capacity) = capacity;
-    BHEAP(BHEAP_NAME, size) = 0;
-}
-
-#undef BHEAP_NAME
-#undef BHEAP_DATA
-#undef BHEAP_TYPE
-#undef BHEAP_CMP
+#endif

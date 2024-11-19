@@ -2,28 +2,20 @@
 #define NEAREST_HEAP_HEADER
 
 #include "common.comp"
-
-shared ScoredPoint nearest[NEAREST_HEAP_CAPACITY];
-
-#define BHEAP_NAME nearest_heap
-#define BHEAP_DATA nearest
-#define BHEAP_TYPE ScoredPoint
-#define BHEAP_CMP(a, b) a.score < b.score
 #include "bheap.comp"
 
 uint nearest_count;
 
 void nearest_heap_init() {
     nearest_count = 0;
-    BHEAP(nearest_heap, init)(NEAREST_HEAP_CAPACITY, 0);
 }
 
 // Push the nearest `ScoredPoint`. Returns true if the `ScoredPoint` was added.
 bool push_nearest(ScoredPoint scored_point) {
     if (nearest_count == NEAREST_HEAP_EF) {
-        if (scored_point.score > BHEAP(nearest_heap, top)().score) {
+        if (scored_point.score > bheap_top(NEAREST_HEAP_OFFSET).score) {
             if (subgroupElect()) {
-                BHEAP(nearest_heap, change_top)(scored_point);
+                bheap_change_top(NEAREST_HEAP_OFFSET, nearest_count, scored_point);
             }
             return true;
         } else {
@@ -31,7 +23,7 @@ bool push_nearest(ScoredPoint scored_point) {
         }
     } else {
         if (subgroupElect()) {
-            BHEAP(nearest_heap, push)(scored_point);
+            bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_CAPACITY, scored_point);
         }
         nearest_count++;
         return true;
@@ -88,7 +80,7 @@ void sort_nearest_bubble() {
     for (uint _cnt = 0; _cnt < iterations_count; _cnt++) {
         // do bubble sort in each subgroup to reduce the number of memory accesses
         for (uint i = gl_SubgroupInvocationID; i < NEAREST_HEAP_CAPACITY; i += SUBGROUP_SIZE) {
-            ScoredPoint scored_point = nearest[i];
+            ScoredPoint scored_point = bheap[NEAREST_HEAP_OFFSET + i];
 
             if (i >= nearest_count) {
                 scored_point.score = negative_infinity;
@@ -96,14 +88,14 @@ void sort_nearest_bubble() {
             uint permut = subgroup_bubble_sort(scored_point.score);
             float shuffled_scored_point_score = subgroupShuffle(scored_point.score, permut);
             uint shuffled_scored_point_id = subgroupShuffle(scored_point.id, permut);
-            nearest[i] = ScoredPoint(shuffled_scored_point_id, shuffled_scored_point_score);
+            bheap[NEAREST_HEAP_OFFSET + i] = ScoredPoint(shuffled_scored_point_id, shuffled_scored_point_score);
             subgroupMemoryBarrierShared();
         }
 
         if (NEAREST_HEAP_CAPACITY > SUBGROUP_SIZE) {
             // do bubble sort in each subgroup to reduce the number of memory accesses
             for (uint i = gl_SubgroupInvocationID + (SUBGROUP_SIZE / 2); i < NEAREST_HEAP_CAPACITY - (SUBGROUP_SIZE / 2); i += SUBGROUP_SIZE) {
-                ScoredPoint scored_point = nearest[i];
+                ScoredPoint scored_point = bheap[NEAREST_HEAP_OFFSET + i];
                 
                 if (i >= nearest_count) {
                     scored_point.score = negative_infinity;
@@ -111,7 +103,7 @@ void sort_nearest_bubble() {
                 uint permut = subgroup_bubble_sort(scored_point.score);
                 float shuffled_scored_point_score = subgroupShuffle(scored_point.score, permut);
                 uint shuffled_scored_point_id = subgroupShuffle(scored_point.id, permut);
-                nearest[i] = ScoredPoint(shuffled_scored_point_id, shuffled_scored_point_score);
+                bheap[NEAREST_HEAP_OFFSET + i] = ScoredPoint(shuffled_scored_point_id, shuffled_scored_point_score);
                 subgroupMemoryBarrierShared();
             }
         }
@@ -121,10 +113,10 @@ void sort_nearest_bubble() {
 void bitonic_cmp(uint i, uint j) {
     uint b_i = i;
     uint b_j = j;
-    if (i < j && j < nearest_count && nearest[b_j].score > nearest[b_i].score) {
-        ScoredPoint temp = nearest[b_i];
-        nearest[b_i] = nearest[b_j];
-        nearest[b_j] = temp;
+    if (i < j && j < nearest_count && bheap[NEAREST_HEAP_OFFSET + b_j].score > bheap[NEAREST_HEAP_OFFSET + b_i].score) {
+        ScoredPoint temp = bheap[NEAREST_HEAP_OFFSET + b_i];
+        bheap[NEAREST_HEAP_OFFSET + b_i] = bheap[NEAREST_HEAP_OFFSET + b_j];
+        bheap[NEAREST_HEAP_OFFSET + b_j] = temp;
     }
 }
 
@@ -133,7 +125,7 @@ void sort_nearest() {
         ScoredPoint scored_point = ScoredPoint(0, negative_infinity);
         uint i = group_offset + gl_SubgroupInvocationID;
         if (i < nearest_count) {
-            scored_point = nearest[i];
+            scored_point = bheap[NEAREST_HEAP_OFFSET + i];
         }
 
         uint permut = subgroup_bubble_sort(scored_point.score);
@@ -143,7 +135,7 @@ void sort_nearest() {
         );
 
         if (i < nearest_count) {
-            nearest[i] = scored_point;
+            bheap[NEAREST_HEAP_OFFSET + i] = scored_point;
         }
     }
 
@@ -163,12 +155,12 @@ void sort_nearest() {
 }
 
 ScoredPoint get_nearest(uint i) {
-    return nearest[i];
+    return bheap[NEAREST_HEAP_OFFSET + i];
 }
 
 void set_nearest(uint i, ScoredPoint scored_point) {
     if (subgroupElect()) {
-        nearest[i] = scored_point;
+        bheap[NEAREST_HEAP_OFFSET + i] = scored_point;
     }
     subgroupMemoryBarrierShared();
 }

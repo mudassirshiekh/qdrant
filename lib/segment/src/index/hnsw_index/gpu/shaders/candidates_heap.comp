@@ -2,19 +2,12 @@
 #define CANDIDATES_HEAP_HEADER
 
 #include "common.comp"
-
-shared ScoredPoint candidates[CANDIDATES_HEAP_CAPACITY];
-uint candidates_count;
-
-#define BHEAP_NAME candidates_heap
-#define BHEAP_DATA candidates
-#define BHEAP_TYPE ScoredPoint
-#define BHEAP_CMP(a, b) a.score < b.score
 #include "bheap.comp"
+
+uint candidates_count;
 
 void candidates_heap_init() {
     candidates_count = 0;
-    BHEAP(candidates_heap, init)(CANDIDATES_HEAP_CAPACITY, 0);
 }
 
 ScoredPoint pop_candidate() {
@@ -26,8 +19,8 @@ ScoredPoint pop_candidate() {
     uint max_index = 0;
     uint scan_start = (candidates_count - 1) / 2;
     for (uint i = scan_start + gl_SubgroupInvocationID; i < candidates_count; i += SUBGROUP_SIZE) {
-        if (candidates[i].score > max_scored_point.score) {
-            max_scored_point = candidates[i];
+        if (bheap[CANDIDATES_HEAP_OFFSET + i].score > max_scored_point.score) {
+            max_scored_point = bheap[CANDIDATES_HEAP_OFFSET + i];
             max_index = i;
         }
     }
@@ -39,13 +32,12 @@ ScoredPoint pop_candidate() {
     max_index = subgroupShuffle(max_index, subgroup_max_thread);
 
     ScoredPoint popped_value = ScoredPoint(0, 0.0);
-    BHEAP(candidates_heap, size)--;
-    candidates_count--;
     if (gl_SubgroupInvocationID == 0) {
-        popped_value = candidates[max_index];
-        candidates[max_index] = candidates[candidates_count];
-        BHEAP(candidates_heap, sift_up)(max_index);
+        popped_value = bheap[CANDIDATES_HEAP_OFFSET + max_index];
+        bheap[CANDIDATES_HEAP_OFFSET + max_index] = bheap[CANDIDATES_HEAP_OFFSET + candidates_count - 1];
+        bheap_sift_up(CANDIDATES_HEAP_OFFSET, max_index);
     }
+    candidates_count--;
 
     return ScoredPoint(
         subgroupBroadcast(popped_value.id, 0),
@@ -55,14 +47,14 @@ ScoredPoint pop_candidate() {
 
 bool push_candidate(ScoredPoint scored_point) {
     if (candidates_count == CANDIDATES_HEAP_CAPACITY) {
-        if (scored_point.score > BHEAP(candidates_heap, top)().score) {
+        if (scored_point.score > bheap_top(CANDIDATES_HEAP_OFFSET).score) {
             if (subgroupElect()) {
-                BHEAP(candidates_heap, change_top)(scored_point);
+                bheap_change_top(CANDIDATES_HEAP_CAPACITY, candidates_count, scored_point);
             }
         }
     } else {
         if (subgroupElect()) {
-            BHEAP(candidates_heap, push)(scored_point);
+            bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, scored_point);
         }
         candidates_count++;
     }

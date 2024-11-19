@@ -5,6 +5,9 @@
 #include "common.comp"
 layout(local_size_x = SUBGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
+#define BHEAP_CAPACITY NEAREST_HEAP_CAPACITY
+#define NEAREST_HEAP_OFFSET 0
+
 #include "nearest_heap.comp"
 
 layout(set = 0, binding = 0)
@@ -36,14 +39,14 @@ void main() {
         groupMemoryBarrier();
         memoryBarrier();
 
-        float nearest_smaller_score_check = subgroupMin(BHEAP(nearest_heap, top)().score);
-        bool is_different = nearest_smaller_score_check != BHEAP(nearest_heap, top)().score;
+        float nearest_smaller_score_check = subgroupMin(bheap_top(NEAREST_HEAP_OFFSET).score);
+        bool is_different = nearest_smaller_score_check != bheap_top(NEAREST_HEAP_OFFSET).score;
         if (subgroupAny(is_different)) {
             if (subgroupElect()) {
                 scores_output.data[point_index] = positive_infinity;
             }
         } else if (subgroupElect()) {
-            scores_output.data[point_index] = BHEAP(nearest_heap, top)().score;
+            scores_output.data[point_index] = bheap_top(NEAREST_HEAP_OFFSET).score;
         }
     }
 

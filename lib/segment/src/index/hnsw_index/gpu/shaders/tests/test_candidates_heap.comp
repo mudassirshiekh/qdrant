@@ -5,6 +5,9 @@
 #include "common.comp"
 layout(local_size_x = SUBGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
+#define BHEAP_CAPACITY CANDIDATES_HEAP_CAPACITY
+#define CANDIDATES_HEAP_OFFSET 0
+
 #include "candidates_heap.comp"
 
 layout(set = 0, binding = 0)
