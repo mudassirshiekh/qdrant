@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use common::fixed_length_priority_queue::FixedLengthPriorityQueue;
 use common::types::{PointOffsetType, ScoredPointOffset};
-use io::file_operations::{atomic_save_bin, read_bin, FileStorageError};
+use io::file_operations::{atomic_save_bin, read_bin};
 use itertools::Itertools;
 use memory::mmap_ops;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,6 @@ use super::graph_links::{GraphLinks, GraphLinksMmap};
 use crate::common::operation_error::OperationResult;
 use crate::common::utils::rev_range;
 use crate::index::hnsw_index::entry_points::EntryPoints;
-use crate::index::hnsw_index::graph_links::GraphLinksConverter;
 use crate::index::hnsw_index::point_scorer::FilteredScorer;
 use crate::index::hnsw_index::search_context::SearchContext;
 use crate::index::visited_pool::{VisitedListHandle, VisitedPool};
@@ -32,17 +31,6 @@ struct GraphLayerData<'a> {
     m0: usize,
     ef_construct: usize,
     entry_points: Cow<'a, EntryPoints>,
-}
-
-/// Contents of the `graph.bin` file (Qdrant 0.8.4).
-#[derive(Deserialize, Serialize, Debug)]
-struct GraphLayersBackwardCompatibility {
-    max_level: usize,
-    m: usize,
-    m0: usize,
-    ef_construct: usize,
-    links_layers: Vec<LayersContainer>,
-    entry_points: EntryPoints,
 }
 
 #[derive(Debug)]
@@ -160,9 +148,7 @@ impl<TGraphLinks: GraphLinks> GraphLayersBase for GraphLayers<TGraphLinks> {
     where
         F: FnMut(PointOffsetType),
     {
-        for link in self.links.links(point_id, level) {
-            f(link);
-        }
+        self.links.for_each_link(point_id, level, &mut f);
     }
 
     fn get_m(&self, level: usize) -> usize {
@@ -246,50 +232,15 @@ where
     TGraphLinks: GraphLinks,
 {
     pub fn load(graph_path: &Path, links_path: &Path) -> OperationResult<Self> {
-        let try_data: Result<GraphLayerData, FileStorageError> = if links_path.exists() {
-            read_bin(graph_path)
-        } else {
-            Err(FileStorageError::generic(format!(
-                "Links file does not exists: {links_path:?}"
-            )))
-        };
-
-        match try_data {
-            Ok(data) => {
-                let links = TGraphLinks::load_from_file(links_path)?;
-                Ok(Self {
-                    m: data.m,
-                    m0: data.m0,
-                    ef_construct: data.ef_construct,
-                    links,
-                    entry_points: data.entry_points.into_owned(),
-                    visited_pool: VisitedPool::new(),
-                })
-            }
-            Err(err) => {
-                let try_legacy: Result<GraphLayersBackwardCompatibility, _> = read_bin(graph_path);
-                if let Ok(legacy) = try_legacy {
-                    log::debug!("Converting legacy graph to new format");
-
-                    let mut converter = GraphLinksConverter::new(legacy.links_layers);
-                    converter.save_as(links_path)?;
-
-                    let links = TGraphLinks::from_converter(converter)?;
-                    let slf = Self {
-                        m: legacy.m,
-                        m0: legacy.m0,
-                        ef_construct: legacy.ef_construct,
-                        links,
-                        entry_points: legacy.entry_points,
-                        visited_pool: VisitedPool::new(),
-                    };
-                    slf.save(graph_path)?;
-                    Ok(slf)
-                } else {
-                    Err(err)?
-                }
-            }
-        }
+        let graph_data: GraphLayerData = read_bin(graph_path)?;
+        Ok(Self {
+            m: graph_data.m,
+            m0: graph_data.m0,
+            ef_construct: graph_data.ef_construct,
+            links: TGraphLinks::load_from_file(links_path)?,
+            entry_points: graph_data.entry_points.into_owned(),
+            visited_pool: VisitedPool::new(),
+        })
     }
 
     pub fn save(&self, path: &Path) -> OperationResult<()> {
@@ -320,6 +271,7 @@ mod tests {
     use itertools::Itertools;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rstest::rstest;
     use tempfile::Builder;
 
     use super::*;
@@ -327,7 +279,7 @@ mod tests {
     use crate::fixtures::index_fixtures::{
         random_vector, FakeFilterContext, TestRawScorerProducer,
     };
-    use crate::index::hnsw_index::graph_links::GraphLinksRam;
+    use crate::index::hnsw_index::graph_links::{GraphLinksConverter, GraphLinksRam};
     use crate::index::hnsw_index::tests::create_graph_layer_fixture;
     use crate::spaces::metric::Metric;
     use crate::spaces::simple::{CosineMetric, DotProductMetric};
@@ -351,8 +303,10 @@ mod tests {
 
     const M: usize = 8;
 
-    #[test]
-    fn test_search_on_level() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_search_on_level(#[case] compressed: bool) {
         let dim = 8;
         let m = 8;
         let ef_construct = 32;
@@ -371,8 +325,12 @@ mod tests {
             m,
             m0: 2 * m,
             ef_construct,
-            links: GraphLinksRam::from_converter(GraphLinksConverter::new(graph_links.clone()))
-                .unwrap(),
+            links: GraphLinksRam::from_converter(GraphLinksConverter::new(
+                graph_links.clone(),
+                compressed,
+                m,
+            ))
+            .unwrap(),
             entry_points: EntryPoints::new(entry_points_num),
             visited_pool: VisitedPool::new(),
         };
@@ -410,8 +368,10 @@ mod tests {
         raw_scorer.take_hardware_counter().discard_results();
     }
 
-    #[test]
-    fn test_save_and_load() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_save_and_load(#[case] compressed: bool) {
         let num_vectors = 100;
         let dim = 8;
         let top = 5;
@@ -424,6 +384,7 @@ mod tests {
             num_vectors,
             M,
             dim,
+            compressed,
             false,
             &mut rng,
             Some(&links_path),
@@ -443,8 +404,10 @@ mod tests {
         assert_eq!(res1, res2)
     }
 
-    #[test]
-    fn test_add_points() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_add_points(#[case] compressed: bool) {
         let num_vectors = 1000;
         let dim = 8;
 
@@ -452,8 +415,15 @@ mod tests {
 
         type M = CosineMetric;
 
-        let (vector_holder, graph_layers) =
-            create_graph_layer_fixture::<M, _>(num_vectors, M, dim, false, &mut rng, None);
+        let (vector_holder, graph_layers) = create_graph_layer_fixture::<M, _>(
+            num_vectors,
+            M,
+            dim,
+            compressed,
+            false,
+            &mut rng,
+            None,
+        );
 
         let main_entry = graph_layers
             .entry_points
@@ -469,7 +439,7 @@ mod tests {
         assert_eq!(main_entry.level, num_levels);
 
         let total_links_0 = (0..num_vectors)
-            .map(|i| graph_layers.links.links(i as PointOffsetType, 0).count())
+            .map(|i| graph_layers.links.links_vec(i as PointOffsetType, 0).len())
             .sum::<usize>();
 
         eprintln!("total_links_0 = {total_links_0:#?}");
@@ -494,9 +464,10 @@ mod tests {
         assert_eq!(reference_top.into_vec(), graph_search);
     }
 
-    #[test]
-    #[ignore]
-    fn test_draw_hnsw_graph() {
+    #[rstest]
+    #[case::uncompressed(false)]
+    #[case::compressed(true)]
+    fn test_draw_hnsw_graph(#[case] compressed: bool) {
         let dim = 2;
         let num_vectors = 500;
 
@@ -506,6 +477,7 @@ mod tests {
             num_vectors,
             M,
             dim,
+            compressed,
             true,
             &mut rng,
             None,
