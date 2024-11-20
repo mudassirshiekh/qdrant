@@ -34,7 +34,7 @@ void main() {
     for (uint i = 0; i < test_params.input_counts; i++) {
         uint point_index = subgroup_index * test_params.input_counts + i;
         ScoredPoint point = input_points.data[point_index];
-        push_nearest(point);
+        bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_EF, point);
 
         groupMemoryBarrier();
         memoryBarrier();

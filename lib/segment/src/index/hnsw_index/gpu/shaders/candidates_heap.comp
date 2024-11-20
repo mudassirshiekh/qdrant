@@ -10,46 +10,4 @@ void candidates_heap_init() {
     candidates_count = 0;
 }
 
-ScoredPoint pop_candidate() {
-    if (candidates_count == 0) {
-        return ScoredPoint(0, 0.0);
-    }
-
-    ScoredPoint max_scored_point = ScoredPoint(0, negative_infinity);
-    uint max_index = 0;
-    uint scan_start = (candidates_count - 1) / 2;
-    for (uint i = scan_start + gl_SubgroupInvocationID; i < candidates_count; i += SUBGROUP_SIZE) {
-        if (bheap[CANDIDATES_HEAP_OFFSET + i].score > max_scored_point.score) {
-            max_scored_point = bheap[CANDIDATES_HEAP_OFFSET + i];
-            max_index = i;
-        }
-    }
-
-    float subgroup_largest = subgroupMax(max_scored_point.score);
-    bool is_max_thread = max_scored_point.score == subgroup_largest;
-    uvec4 subgroup_max_threads = subgroupBallot(is_max_thread);
-    uint subgroup_max_thread = subgroupBallotFindLSB(subgroup_max_threads);
-    max_index = subgroupShuffle(max_index, subgroup_max_thread);
-
-    ScoredPoint popped_value = bheap[CANDIDATES_HEAP_OFFSET + max_index];
-    if (gl_SubgroupInvocationID == 0) {
-        bheap[CANDIDATES_HEAP_OFFSET + max_index] = bheap[CANDIDATES_HEAP_OFFSET + candidates_count - 1];
-        bheap_sift_up(CANDIDATES_HEAP_OFFSET, max_index);
-    }
-    candidates_count--;
-
-    return popped_value;
-}
-
-bool push_candidate(ScoredPoint scored_point) {
-    if (candidates_count == CANDIDATES_HEAP_CAPACITY) {
-        if (scored_point.score > bheap_top(CANDIDATES_HEAP_OFFSET).score) {
-            bheap_change_top(CANDIDATES_HEAP_CAPACITY, candidates_count, scored_point);
-        }
-    } else {
-        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, scored_point);
-    }
-    return true;
-}
-
 #endif

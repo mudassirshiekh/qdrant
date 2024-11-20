@@ -1,31 +1,3 @@
-/******
-Shader binary heap.
-
-Usage example.
-Step 1: defines
-
-#define BHEAP_NAME bheap // provide binary heap name. Name is required for cases when there are many binary heaps in one shader
-float heap_data[8]; // reserve storage for binary heap
-#define BHEAP_DATA heap_data // provide storage name
-#define BHEAP_TYPE float // binary tree element type
-#define BHEAP_CMP(a, b) a > b // cmp function
-#include "bheap.comp" // define all binary tree functions
-
-Step 2: init
-BHEAP(BHEAP_NAME, init)(8, 0); // capacity and offset in storage
-
-Step 3: usage
-BHEAP(BHEAP_NAME, capacity) // get capacity
-BHEAP(BHEAP_NAME, offset) // get offset
-BHEAP(BHEAP_NAME, size); // get size
-BHEAP(BHEAP_NAME, top)(); // get top value
-BHEAP(BHEAP_NAME, pop)(); // pop value
-BHEAP(BHEAP_NAME, change_top)(1.0); // pop and push
-BHEAP(BHEAP_NAME, push)(1.0); // push value
-BHEAP(BHEAP_NAME, into_array)(); // convert to sorted array and return array size
-
-******/
-
 #ifndef BHEAP_HEADER
 #define BHEAP_HEADER
 
@@ -69,20 +41,37 @@ void bheap_sift_up(uint offset, uint i) {
     }
 }
 
-// push
-bool bheap_push(uint offset, in out uint size, uint capacity, ScoredPoint score) {
-    uint i = size;
-    size++;
-    if (subgroupElect()) {
-        bheap[offset + i] = score;
-        bheap_sift_up(offset, i);
-    }
-    return true;
-}
-
 // get top value
 ScoredPoint bheap_top(uint offset) {
     return bheap[offset];
+}
+
+// replace top value
+void bheap_change_top(uint offset, uint size, ScoredPoint new_value) {
+    if (subgroupElect()) {
+        bheap[offset] = new_value;
+        bheap_sift_down(offset, size, 0);
+    }
+}
+
+// push
+bool bheap_push(uint offset, in out uint size, uint capacity, ScoredPoint score) {
+    if (size == capacity) {
+        if (score.score > bheap[offset].score) {
+            bheap_change_top(offset, capacity, score);
+            return true;
+        } else {
+            return false;
+        }
+    } else {
+        uint i = size;
+        size++;
+        if (subgroupElect()) {
+            bheap[offset + i] = score;
+            bheap_sift_up(offset, i);
+        }
+        return true;
+    }
 }
 
 // pop value
@@ -96,12 +85,35 @@ ScoredPoint bheap_pop(uint offset, in out uint size) {
     return top_value;
 }
 
-// replace top value
-void bheap_change_top(uint offset, uint size, ScoredPoint new_value) {
-    if (subgroupElect()) {
-        bheap[offset] = new_value;
-        bheap_sift_down(offset, size, 0);
+ScoredPoint bheap_pop_max(uint offset, in out uint size) {
+    if (size == 0) {
+        return ScoredPoint(0, 0.0);
     }
+
+    ScoredPoint max_scored_point = ScoredPoint(0, negative_infinity);
+    uint max_index = 0;
+    uint scan_start = (size - 1) / 2;
+    for (uint i = scan_start + gl_SubgroupInvocationID; i < size; i += SUBGROUP_SIZE) {
+        if (bheap[offset + i].score > max_scored_point.score) {
+            max_scored_point = bheap[offset + i];
+            max_index = i;
+        }
+    }
+
+    float subgroup_largest = subgroupMax(max_scored_point.score);
+    bool is_max_thread = max_scored_point.score == subgroup_largest;
+    uvec4 subgroup_max_threads = subgroupBallot(is_max_thread);
+    uint subgroup_max_thread = subgroupBallotFindLSB(subgroup_max_threads);
+    max_index = subgroupShuffle(max_index, subgroup_max_thread);
+
+    ScoredPoint popped_value = bheap[offset + max_index];
+    if (subgroupElect()) {
+        bheap[offset + max_index] = bheap[offset + size - 1];
+        bheap_sift_up(offset, max_index);
+    }
+    size--;
+
+    return popped_value;
 }
 
 // into_array

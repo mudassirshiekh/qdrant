@@ -10,21 +10,6 @@ void nearest_heap_init() {
     nearest_count = 0;
 }
 
-// Push the nearest `ScoredPoint`. Returns true if the `ScoredPoint` was added.
-bool push_nearest(ScoredPoint scored_point) {
-    if (nearest_count == NEAREST_HEAP_EF) {
-        if (scored_point.score > bheap_top(NEAREST_HEAP_OFFSET).score) {
-            bheap_change_top(NEAREST_HEAP_OFFSET, nearest_count, scored_point);
-            return true;
-        } else {
-            return false;
-        }
-    } else {
-        bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_CAPACITY, scored_point);
-        return true;
-    }
-}
-
 uint subgroup_bubble_sort(float score) {
     uint invocation = gl_SubgroupInvocationID;
     bool is_even = invocation % 2 == 0;

@@ -15,9 +15,9 @@
 
 void process_candidate(ScoredPoint scored_point) {
     bool not_presented = bheap_top(NEAREST_HEAP_OFFSET).id != scored_point.id;
-    bool was_added = push_nearest(scored_point);
+    bool was_added = bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_EF, scored_point);
     if (was_added && not_presented) {
-        push_candidate(scored_point);
+        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, scored_point);
         subgroupMemoryBarrierShared();
     }
 }
@@ -88,12 +88,12 @@ uint search(POINT_ID point_id, ScoredPoint entry) {
         mark_visited(point_id);
         mark_visited(entry.id);
     }
-    push_nearest(entry);
-    push_candidate(entry);
+    bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_EF, entry);
+    bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, entry);
     groupMemoryBarrier();
     
     while (candidates_count > 0) {
-        ScoredPoint candidate = pop_candidate();
+        ScoredPoint candidate = bheap_pop_max(CANDIDATES_HEAP_OFFSET, candidates_count);
         if (candidate.score < bheap_top(NEAREST_HEAP_OFFSET).score) {
             continue;
         }

@@ -30,22 +30,22 @@ void main() {
     for (uint i = 0; i < test_params.input_counts; i++) {
         uint point_index = subgroup_index * test_params.input_counts + i;
         ScoredPoint point = input_points.data[point_index];
-        push_candidate(point);
+        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, point);
     }
 
     while (candidates_count > 0) {
-        ScoredPoint candidate = pop_candidate();
+        ScoredPoint candidate = bheap_pop_max(CANDIDATES_HEAP_OFFSET, candidates_count);
     }
 
     for (uint i = 0; i < test_params.input_counts; i++) {
         uint point_index = subgroup_index * test_params.input_counts + i;
         ScoredPoint point = input_points.data[point_index];
-        push_candidate(point);
+        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, point);
     }
 
     uint output_index = subgroup_index * test_params.input_counts;
     while (candidates_count > 0) {
-        ScoredPoint candidate = pop_candidate();
+        ScoredPoint candidate = bheap_pop_max(CANDIDATES_HEAP_OFFSET, candidates_count);
         if (subgroupElect()) {
             scores_output.data[output_index] = candidate;
         }
