@@ -56,7 +56,7 @@ void main() {
     if (subgroupElect()) {
         for (uint i = 0; i < NEAREST_HEAP_EF; i++) {
             uint point_index = subgroup_index * NEAREST_HEAP_EF + i;
-            sorted_output.data[point_index] = shared_buffer[NEAREST_HEAP_OFFSET + i];
+            sorted_output.data[point_index] = shared_buffer[NEAREST_HEAP_OFFSET + i].id;
         }
     }
 }

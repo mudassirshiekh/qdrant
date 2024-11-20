@@ -60,7 +60,7 @@ void main() {
 
     if (subgroupElect()) {
         if (search_count > 0) {
-            new_entries.data[subgroup_index] = get_nearest(0).id;
+            new_entries.data[subgroup_index] = shared_buffer[NEAREST_HEAP_OFFSET].id;
         } else {
             new_entries.data[subgroup_index] = request.entry;
         }
@@ -77,7 +77,7 @@ void main() {
         patches.data[patches_offset] = request.id;
         patches.data[patches_offset + 1] = count;
         for (uint i = 0; i < count; i++) {
-            patches.data[patches_offset + i + 2] = get_nearest(i).id;
+            patches.data[patches_offset + i + 2] = shared_buffer[NEAREST_HEAP_OFFSET + i].id;
         }
     }
     subgroupMemoryBarrierShared();
@@ -102,23 +102,20 @@ void main() {
             set_target(other_id);
             nearest_count = 0;
             LINKS_FOREACH(other_id) {
-                set_nearest(
-                    nearest_count,
-                    ScoredPoint(
-                        LINKS_FOREACH_VALUE,
-                        similarity(LINKS_FOREACH_VALUE))
+                shared_buffer[NEAREST_HEAP_OFFSET + nearest_count] = ScoredPoint(
+                    LINKS_FOREACH_VALUE,
+                    similarity(LINKS_FOREACH_VALUE)
                 );
                 nearest_count++;
             }
-            set_nearest(
-                nearest_count,
-                ScoredPoint(
-                    request.id,
-                    similarity(request.id))
+            shared_buffer[NEAREST_HEAP_OFFSET + nearest_count] = ScoredPoint(
+                request.id,
+                similarity(request.id)
             );
             nearest_count++;
 
-            sort_nearest();
+            subgroupMemoryBarrierShared();
+            sort(NEAREST_HEAP_OFFSET, nearest_count);
             uint other_new_links_count = run_heuristic();
 
             if (subgroupElect()) {
@@ -129,7 +126,7 @@ void main() {
             }
             for (uint j = 0; j < other_new_links_count; j++) {
                 if (subgroupElect()) {
-                    uint l = get_nearest(j).id;
+                    uint l = shared_buffer[NEAREST_HEAP_OFFSET + j].id;
                     patches.data[other_patches_offset] = l;
                     other_patches_offset++;
                 }

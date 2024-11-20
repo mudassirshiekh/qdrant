@@ -116,12 +116,12 @@ uint run_heuristic() {
             break;
         }
 
-        ScoredPoint current_closest = get_nearest(i);
+        ScoredPoint current_closest = shared_buffer[NEAREST_HEAP_OFFSET + i];
         set_target(current_closest.id);
         bool is_good = true;
 
         for (uint j = 0; j < result_count; j++) {
-            ScoredPoint selected_point = get_nearest(j);
+            ScoredPoint selected_point = shared_buffer[NEAREST_HEAP_OFFSET + j];
             float dist_to_already_selected = similarity(selected_point.id);
             if (dist_to_already_selected > current_closest.score) {
                 is_good = false;
@@ -130,7 +130,7 @@ uint run_heuristic() {
         }
 
         if (is_good) {
-            set_nearest(result_count, current_closest);
+            shared_buffer[NEAREST_HEAP_OFFSET + result_count] = current_closest;
             result_count += 1;
         }
     }

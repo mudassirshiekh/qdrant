@@ -160,7 +160,7 @@ impl GpuSearchContext {
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
-            .build()?;
+            .build("run_greedy_search.comp")?;
 
         let insert_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/run_insert_vector.comp"))
@@ -170,7 +170,7 @@ impl GpuSearchContext {
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
-            .build()?;
+            .build("run_insert_vector.comp")?;
 
         let search_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/tests/test_hnsw_search.comp"))
@@ -180,7 +180,7 @@ impl GpuSearchContext {
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
-            .build()?;
+            .build("test_hnsw_search.comp")?;
 
         let patches_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/run_get_patch.comp"))
@@ -190,7 +190,7 @@ impl GpuSearchContext {
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
-            .build()?;
+            .build("run_get_patch.comp")?;
 
         let greedy_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
             .add_storage_buffer(0)
@@ -1120,7 +1120,7 @@ mod tests {
             .with_parameters(&test.gpu_search_context.gpu_links)
             .with_parameters(&test.gpu_search_context.gpu_visited_flags)
             .with_parameters(&test.gpu_search_context_params)
-            .build()
+            .build("tests/test_heuristic.comp")
             .unwrap();
 
         let descriptor_set_layout = gpu::DescriptorSetLayout::builder()

@@ -4,36 +4,36 @@
 #include "common.comp"
 #include "shared_buffer.comp"
 
-void __bheap_swap(uint offset, uint i, uint j) {
+void _bheap_swap(uint offset, uint i, uint j) {
     ScoredPoint tmp = shared_buffer[offset + i];
     shared_buffer[offset + i] = shared_buffer[offset + j];
     shared_buffer[offset + j] = tmp;
 }
 
-bool __bheap_cmp(uint offset, uint i, uint j) {
+bool _bheap_cmp(uint offset, uint i, uint j) {
     return shared_buffer[offset + i].score < shared_buffer[offset + j].score;
 }
 
 // sift down
-void __bheap_sift_down(uint offset, uint size, uint i) {
+void _bheap_sift_down(uint offset, uint size, uint i) {
     while (2 * i + 1 < size) {
         uint left = 2 * i + 1;
         uint right = 2 * i + 2;
         uint j = left;
-        if (right < size && __bheap_cmp(offset, right, left)) {
+        if (right < size && _bheap_cmp(offset, right, left)) {
             j = right;
         }
-        if (__bheap_cmp(offset, i, j)) {
+        if (_bheap_cmp(offset, i, j)) {
             break;
         }
-        __bheap_swap(offset, i, j);
+        _bheap_swap(offset, i, j);
         i = j;
     }
 }
 
-void __bheap_sift_up(uint offset, uint i) {
-    while (i > 0 && __bheap_cmp(offset, i, (i - 1) / 2)) {
-        __bheap_swap(offset, i, (i - 1) / 2);
+void _bheap_sift_up(uint offset, uint i) {
+    while (i > 0 && _bheap_cmp(offset, i, (i - 1) / 2)) {
+        _bheap_swap(offset, i, (i - 1) / 2);
         i = (i - 1) / 2;
     }
 }
@@ -47,7 +47,7 @@ ScoredPoint bheap_top(uint offset) {
 void bheap_change_top(uint offset, uint size, ScoredPoint new_value) {
     if (subgroupElect()) {
         shared_buffer[offset] = new_value;
-        __bheap_sift_down(offset, size, 0);
+        _bheap_sift_down(offset, size, 0);
     }
 }
 
@@ -65,7 +65,7 @@ bool bheap_push(uint offset, in out uint size, uint capacity, ScoredPoint score)
         size++;
         if (subgroupElect()) {
             shared_buffer[offset + i] = score;
-            __bheap_sift_up(offset, i);
+            _bheap_sift_up(offset, i);
         }
         return true;
     }
@@ -77,7 +77,7 @@ ScoredPoint bheap_pop(uint offset, in out uint size) {
     size--;
     if (subgroupElect()) {
         shared_buffer[offset] = shared_buffer[offset + size];
-        __bheap_sift_down(offset, size, 0);
+        _bheap_sift_down(offset, size, 0);
     }
     return top_value;
 }
@@ -106,7 +106,7 @@ ScoredPoint bheap_pop_max(uint offset, in out uint size) {
     ScoredPoint popped_value = shared_buffer[offset + max_index];
     if (subgroupElect()) {
         shared_buffer[offset + max_index] = shared_buffer[offset + size - 1];
-        __bheap_sift_up(offset, max_index);
+        _bheap_sift_up(offset, max_index);
     }
     size--;
 

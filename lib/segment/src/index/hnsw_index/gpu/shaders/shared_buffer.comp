@@ -5,7 +5,7 @@
 
 shared ScoredPoint shared_buffer[SHARED_BUFFER_CAPACITY];
 
-uint __subgroup_bubble_sort(float score) {
+uint _subgroup_bubble_sort(float score) {
     uint invocation = gl_SubgroupInvocationID;
     bool is_even = invocation % 2 == 0;
     uint invocation_forward = is_even ? invocation + 1 : invocation - 1;
@@ -50,11 +50,11 @@ uint __subgroup_bubble_sort(float score) {
     return index;
 }
 
-void __bitonic_cmp(uint offset, uint count, uint b_i, uint b_j) {
-    if (i < j && j < count && bheap[offset + b_j].score > bheap[offset + b_i].score) {
-        ScoredPoint temp = bheap[offset + b_i];
-        bheap[offset + b_i] = bheap[offset + b_j];
-        bheap[offset + b_j] = temp;
+void _bitonic_cmp(uint offset, uint count, uint b_i, uint b_j) {
+    if (b_i < b_j && b_j < count && shared_buffer[offset + b_j].score > shared_buffer[offset + b_i].score) {
+        ScoredPoint temp = shared_buffer[offset + b_i];
+        shared_buffer[offset + b_i] = shared_buffer[offset + b_j];
+        shared_buffer[offset + b_j] = temp;
     }
 }
 
@@ -63,29 +63,30 @@ void sort(uint offset, uint count) {
         ScoredPoint scored_point = ScoredPoint(0, negative_infinity);
         uint i = group_offset + gl_SubgroupInvocationID;
         if (i < count) {
-            scored_point = bheap[offset + i];
+            scored_point = shared_buffer[offset + i];
         }
 
-        uint permut = __subgroup_bubble_sort(scored_point.score);
+        uint permut = _subgroup_bubble_sort(scored_point.score);
         scored_point = ScoredPoint(
             subgroupShuffle(scored_point.id, permut),
             subgroupShuffle(scored_point.score, permut)
         );
 
         if (i < count) {
-            bheap[offset + i] = scored_point;
+            shared_buffer[offset + i] = scored_point;
         }
     }
+    subgroupMemoryBarrierShared();
 
     for (uint k = 64; (k >> 1) < count; k <<= 1) {
         for (uint i = gl_SubgroupInvocationID; i < count; i += SUBGROUP_SIZE) {
-            __bitonic_cmp(offset, count, i, i ^ (k - 1));
+            _bitonic_cmp(offset, count, i, i ^ (k - 1));
         }
         subgroupMemoryBarrierShared();
 
         for (uint j = k >> 1; 0 < j; j >>= 1) {
             for (uint i = gl_SubgroupInvocationID; i < count; i += SUBGROUP_SIZE) {
-                __bitonic_cmp(offset, count, i, i ^ j);
+                _bitonic_cmp(offset, count, i, i ^ j);
             }
             subgroupMemoryBarrierShared();
         }

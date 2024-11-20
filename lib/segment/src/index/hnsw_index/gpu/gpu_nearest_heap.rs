@@ -91,7 +91,7 @@ mod tests {
         let shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/tests/test_nearest_heap.comp"))
             .with_parameters(&gpu_nearest_heap)
-            .build()
+            .build("tests/test_nearest_heap.comp")
             .unwrap();
 
         let input_points_buffer = gpu::Buffer::new(

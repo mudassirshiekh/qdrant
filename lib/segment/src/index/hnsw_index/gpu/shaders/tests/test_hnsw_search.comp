@@ -44,7 +44,7 @@ void main() {
         uint result_index_offset = NEAREST_HEAP_EF * subgroup_index;
         uint i = 0;
         for (; i < count; i++) {
-            search_results.data[result_index_offset + i] = get_nearest(i);
+            search_results.data[result_index_offset + i] = shared_buffer[NEAREST_HEAP_OFFSET + i];
         }
         for (; i < NEAREST_HEAP_EF; i++) {
             search_results.data[result_index_offset + i] = ScoredPoint(UINT_MAX, 0.0);

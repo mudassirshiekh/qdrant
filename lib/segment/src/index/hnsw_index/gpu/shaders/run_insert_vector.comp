@@ -53,7 +53,7 @@ void main() {
 
     if (subgroupElect()) {
         if (search_count > 0) {
-            new_entries.data[subgroup_index] = get_nearest(0).id;
+            new_entries.data[subgroup_index] = shared_buffer[NEAREST_HEAP_OFFSET].id;
         } else {
             new_entries.data[subgroup_index] = request.entry;
         }
@@ -66,7 +66,7 @@ void main() {
 
     // update request.id links
     for (uint i = gl_SubgroupInvocationID; i < count; i += SUBGROUP_SIZE) {
-        GET_LINK(request.id, i) = get_nearest(i).id;
+        GET_LINK(request.id, i) = shared_buffer[NEAREST_HEAP_OFFSET + i].id;
     }
     if (subgroupElect()) {
         LINKS_SET_SIZE(request.id, count);
@@ -99,27 +99,24 @@ void main() {
             set_target(other_id);
             nearest_count = 0;
             LINKS_FOREACH(other_id) {
-                set_nearest(
-                    nearest_count,
-                    ScoredPoint(
-                        LINKS_FOREACH_VALUE,
-                        similarity(LINKS_FOREACH_VALUE))
+                shared_buffer[NEAREST_HEAP_OFFSET + nearest_count] = ScoredPoint(
+                    LINKS_FOREACH_VALUE,
+                    similarity(LINKS_FOREACH_VALUE)
                 );
                 nearest_count++;
             }
-            set_nearest(
-                nearest_count,
-                ScoredPoint(
-                    request.id,
-                    similarity(request.id))
+            shared_buffer[NEAREST_HEAP_OFFSET + nearest_count] = ScoredPoint(
+                request.id,
+                similarity(request.id)
             );
             nearest_count++;
 
-            sort_nearest();
+            subgroupMemoryBarrierShared();
+            sort(NEAREST_HEAP_OFFSET, nearest_count);
             uint other_new_links_count = run_heuristic();
 
             for (uint j = gl_SubgroupInvocationID; j < other_new_links_count; j += SUBGROUP_SIZE) {
-                GET_LINK(other_id, j) = get_nearest(j).id;
+                GET_LINK(other_id, j) = shared_buffer[NEAREST_HEAP_OFFSET + j].id;
             }
             if (subgroupElect()) {
                 LINKS_SET_SIZE(other_id, other_new_links_count);
