@@ -5,10 +5,11 @@
 #include "common.comp"
 layout(local_size_x = SUBGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
-#define BHEAP_CAPACITY CANDIDATES_HEAP_CAPACITY
+#define SHARED_BUFFER_CAPACITY CANDIDATES_HEAP_CAPACITY
 #define CANDIDATES_HEAP_OFFSET 0
 
-#include "candidates_heap.comp"
+#include "shared_buffer.comp"
+#include "bheap.comp"
 
 layout(set = 0, binding = 0)
 readonly uniform TestParams {
@@ -23,8 +24,9 @@ layout(set = 0, binding = 2) buffer ScoresOuput {
     ScoredPoint data[];
 } scores_output;
 
+uint candidates_count = 0;
+
 void main() {
-    candidates_heap_init();
     uint subgroup_index = SUBGROUP_ID;
 
     for (uint i = 0; i < test_params.input_counts; i++) {

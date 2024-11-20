@@ -1,17 +1,19 @@
 #ifndef SEARCH_CONTEXT_HEADER
 #define SEARCH_CONTEXT_HEADER
 
-#define BHEAP_CAPACITY NEAREST_HEAP_CAPACITY + CANDIDATES_HEAP_CAPACITY
+#define SHARED_BUFFER_CAPACITY NEAREST_HEAP_CAPACITY + CANDIDATES_HEAP_CAPACITY
 #define NEAREST_HEAP_OFFSET 0
 #define CANDIDATES_HEAP_OFFSET NEAREST_HEAP_CAPACITY
 
 #include "common.comp"
+#include "shared_buffer.comp"
 #include "bheap.comp"
 #include "vector_storage.comp"
 #include "links.comp"
-#include "nearest_heap.comp"
-#include "candidates_heap.comp"
 #include "visited_flags.comp"
+
+uint nearest_count = 0;
+uint candidates_count = 0;
 
 void process_candidate(ScoredPoint scored_point) {
     bool not_presented = bheap_top(NEAREST_HEAP_OFFSET).id != scored_point.id;
@@ -138,8 +140,8 @@ uint run_heuristic() {
 }
 
 void search_context_init() {
-    nearest_heap_init();
-    candidates_heap_init();
+    nearest_count = 0;
+    candidates_count = 0;
 }
 
 #endif

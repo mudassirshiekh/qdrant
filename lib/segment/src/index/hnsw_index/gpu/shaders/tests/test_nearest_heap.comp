@@ -5,10 +5,11 @@
 #include "common.comp"
 layout(local_size_x = SUBGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
-#define BHEAP_CAPACITY NEAREST_HEAP_CAPACITY
+#define SHARED_BUFFER_CAPACITY NEAREST_HEAP_CAPACITY
 #define NEAREST_HEAP_OFFSET 0
 
-#include "nearest_heap.comp"
+#include "shared_buffer.comp"
+#include "bheap.comp"
 
 layout(set = 0, binding = 0)
 readonly uniform TestParams {
@@ -27,8 +28,9 @@ layout(set = 0, binding = 3) buffer SortedOuput {
     uint data[];
 } sorted_output;
 
+uint nearest_count = 0;
+
 void main() {
-    nearest_heap_init();
     uint subgroup_index = SUBGROUP_ID;
 
     for (uint i = 0; i < test_params.input_counts; i++) {
@@ -50,12 +52,11 @@ void main() {
         }
     }
 
-    sort_nearest();
+    sort(NEAREST_HEAP_OFFSET, nearest_count);
     if (subgroupElect()) {
         for (uint i = 0; i < NEAREST_HEAP_EF; i++) {
             uint point_index = subgroup_index * NEAREST_HEAP_EF + i;
-            ScoredPoint point = get_nearest(i);
-            sorted_output.data[point_index] = point.id;
+            sorted_output.data[point_index] = shared_buffer[NEAREST_HEAP_OFFSET + i];
         }
     }
 }

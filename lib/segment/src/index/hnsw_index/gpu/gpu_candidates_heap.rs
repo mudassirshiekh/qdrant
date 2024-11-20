@@ -22,8 +22,8 @@ impl ShaderBuilderParameters for GpuCandidatesHeap {
     fn shader_includes(&self) -> HashMap<String, String> {
         HashMap::from([
             (
-                "candidates_heap.comp".to_string(),
-                include_str!("shaders/candidates_heap.comp").to_string(),
+                "shared_buffer.comp".to_string(),
+                include_str!("shaders/shared_buffer.comp").to_string(),
             ),
             (
                 "bheap.comp".to_string(),

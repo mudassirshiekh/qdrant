@@ -2,62 +2,59 @@
 #define BHEAP_HEADER
 
 #include "common.comp"
+#include "shared_buffer.comp"
 
-shared ScoredPoint bheap[BHEAP_CAPACITY];
-
-// swap
-void bheap_swap(uint offset, uint i, uint j) {
-    ScoredPoint tmp = bheap[offset + i];
-    bheap[offset + i] = bheap[offset + j];
-    bheap[offset + j] = tmp;
+void __bheap_swap(uint offset, uint i, uint j) {
+    ScoredPoint tmp = shared_buffer[offset + i];
+    shared_buffer[offset + i] = shared_buffer[offset + j];
+    shared_buffer[offset + j] = tmp;
 }
 
-// compare, call BHEAP_CMP function
-bool bheap_cmp(uint offset, uint i, uint j) {
-    return bheap[offset + i].score < bheap[offset + j].score;
+bool __bheap_cmp(uint offset, uint i, uint j) {
+    return shared_buffer[offset + i].score < shared_buffer[offset + j].score;
 }
 
 // sift down
-void bheap_sift_down(uint offset, uint size, uint i) {
+void __bheap_sift_down(uint offset, uint size, uint i) {
     while (2 * i + 1 < size) {
         uint left = 2 * i + 1;
         uint right = 2 * i + 2;
         uint j = left;
-        if (right < size && bheap_cmp(offset, right, left)) {
+        if (right < size && __bheap_cmp(offset, right, left)) {
             j = right;
         }
-        if (bheap_cmp(offset, i, j)) {
+        if (__bheap_cmp(offset, i, j)) {
             break;
         }
-        bheap_swap(offset, i, j);
+        __bheap_swap(offset, i, j);
         i = j;
     }
 }
 
-void bheap_sift_up(uint offset, uint i) {
-    while (i > 0 && bheap_cmp(offset, i, (i - 1) / 2)) {
-        bheap_swap(offset, i, (i - 1) / 2);
+void __bheap_sift_up(uint offset, uint i) {
+    while (i > 0 && __bheap_cmp(offset, i, (i - 1) / 2)) {
+        __bheap_swap(offset, i, (i - 1) / 2);
         i = (i - 1) / 2;
     }
 }
 
 // get top value
 ScoredPoint bheap_top(uint offset) {
-    return bheap[offset];
+    return shared_buffer[offset];
 }
 
 // replace top value
 void bheap_change_top(uint offset, uint size, ScoredPoint new_value) {
     if (subgroupElect()) {
-        bheap[offset] = new_value;
-        bheap_sift_down(offset, size, 0);
+        shared_buffer[offset] = new_value;
+        __bheap_sift_down(offset, size, 0);
     }
 }
 
 // push
 bool bheap_push(uint offset, in out uint size, uint capacity, ScoredPoint score) {
     if (size == capacity) {
-        if (score.score > bheap[offset].score) {
+        if (score.score > shared_buffer[offset].score) {
             bheap_change_top(offset, capacity, score);
             return true;
         } else {
@@ -67,8 +64,8 @@ bool bheap_push(uint offset, in out uint size, uint capacity, ScoredPoint score)
         uint i = size;
         size++;
         if (subgroupElect()) {
-            bheap[offset + i] = score;
-            bheap_sift_up(offset, i);
+            shared_buffer[offset + i] = score;
+            __bheap_sift_up(offset, i);
         }
         return true;
     }
@@ -79,8 +76,8 @@ ScoredPoint bheap_pop(uint offset, in out uint size) {
     ScoredPoint top_value = bheap_top(offset);
     size--;
     if (subgroupElect()) {
-        bheap[offset] = bheap[offset + size];
-        bheap_sift_down(offset, size, 0);
+        shared_buffer[offset] = shared_buffer[offset + size];
+        __bheap_sift_down(offset, size, 0);
     }
     return top_value;
 }
@@ -94,8 +91,8 @@ ScoredPoint bheap_pop_max(uint offset, in out uint size) {
     uint max_index = 0;
     uint scan_start = (size - 1) / 2;
     for (uint i = scan_start + gl_SubgroupInvocationID; i < size; i += SUBGROUP_SIZE) {
-        if (bheap[offset + i].score > max_scored_point.score) {
-            max_scored_point = bheap[offset + i];
+        if (shared_buffer[offset + i].score > max_scored_point.score) {
+            max_scored_point = shared_buffer[offset + i];
             max_index = i;
         }
     }
@@ -106,10 +103,10 @@ ScoredPoint bheap_pop_max(uint offset, in out uint size) {
     uint subgroup_max_thread = subgroupBallotFindLSB(subgroup_max_threads);
     max_index = subgroupShuffle(max_index, subgroup_max_thread);
 
-    ScoredPoint popped_value = bheap[offset + max_index];
+    ScoredPoint popped_value = shared_buffer[offset + max_index];
     if (subgroupElect()) {
-        bheap[offset + max_index] = bheap[offset + size - 1];
-        bheap_sift_up(offset, max_index);
+        shared_buffer[offset + max_index] = shared_buffer[offset + size - 1];
+        __bheap_sift_up(offset, max_index);
     }
     size--;
 
@@ -123,7 +120,7 @@ uint bheap_into_array(uint offset, in out uint size) {
         uint i = size - 1;
         ScoredPoint value = bheap_pop(offset, size);
         if (subgroupElect()) {
-            bheap[offset + i] = value;
+            shared_buffer[offset + i] = value;
         }
     }
     return array_size;
