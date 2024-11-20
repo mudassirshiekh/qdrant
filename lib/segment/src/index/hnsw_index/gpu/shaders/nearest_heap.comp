@@ -14,18 +14,13 @@ void nearest_heap_init() {
 bool push_nearest(ScoredPoint scored_point) {
     if (nearest_count == NEAREST_HEAP_EF) {
         if (scored_point.score > bheap_top(NEAREST_HEAP_OFFSET).score) {
-            if (subgroupElect()) {
-                bheap_change_top(NEAREST_HEAP_OFFSET, nearest_count, scored_point);
-            }
+            bheap_change_top(NEAREST_HEAP_OFFSET, nearest_count, scored_point);
             return true;
         } else {
             return false;
         }
     } else {
-        if (subgroupElect()) {
-            bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_CAPACITY, scored_point);
-        }
-        nearest_count++;
+        bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_CAPACITY, scored_point);
         return true;
     }
 }

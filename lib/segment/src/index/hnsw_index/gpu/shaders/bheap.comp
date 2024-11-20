@@ -70,10 +70,13 @@ void bheap_sift_up(uint offset, uint i) {
 }
 
 // push
-bool bheap_push(uint offset, uint size, uint capacity, ScoredPoint score) {
+bool bheap_push(uint offset, in out uint size, uint capacity, ScoredPoint score) {
     uint i = size;
-    bheap[offset + i] = score;
-    bheap_sift_up(offset, i);
+    size++;
+    if (subgroupElect()) {
+        bheap[offset + i] = score;
+        bheap_sift_up(offset, i);
+    }
     return true;
 }
 
@@ -83,28 +86,33 @@ ScoredPoint bheap_top(uint offset) {
 }
 
 // pop value
-ScoredPoint bheap_pop(uint offset, uint size) {
+ScoredPoint bheap_pop(uint offset, in out uint size) {
     ScoredPoint top_value = bheap_top(offset);
     size--;
-    bheap[offset] = bheap[offset + size];
-    bheap_sift_down(offset, size, 0);
+    if (subgroupElect()) {
+        bheap[offset] = bheap[offset + size];
+        bheap_sift_down(offset, size, 0);
+    }
     return top_value;
 }
 
 // replace top value
 void bheap_change_top(uint offset, uint size, ScoredPoint new_value) {
-    bheap[offset] = new_value;
-    bheap_sift_down(offset, size, 0);
+    if (subgroupElect()) {
+        bheap[offset] = new_value;
+        bheap_sift_down(offset, size, 0);
+    }
 }
 
 // into_array
-uint bheap_into_array(uint offset, uint size) {
+uint bheap_into_array(uint offset, in out uint size) {
     uint array_size = size;
     while (size > 0) {
         uint i = size - 1;
         ScoredPoint value = bheap_pop(offset, size);
-        size--;
-        bheap[offset + i] = value;
+        if (subgroupElect()) {
+            bheap[offset + i] = value;
+        }
     }
     return array_size;
 }

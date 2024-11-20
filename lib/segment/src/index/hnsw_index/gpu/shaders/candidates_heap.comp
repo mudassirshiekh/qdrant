@@ -31,32 +31,23 @@ ScoredPoint pop_candidate() {
     uint subgroup_max_thread = subgroupBallotFindLSB(subgroup_max_threads);
     max_index = subgroupShuffle(max_index, subgroup_max_thread);
 
-    ScoredPoint popped_value = ScoredPoint(0, 0.0);
+    ScoredPoint popped_value = bheap[CANDIDATES_HEAP_OFFSET + max_index];
     if (gl_SubgroupInvocationID == 0) {
-        popped_value = bheap[CANDIDATES_HEAP_OFFSET + max_index];
         bheap[CANDIDATES_HEAP_OFFSET + max_index] = bheap[CANDIDATES_HEAP_OFFSET + candidates_count - 1];
         bheap_sift_up(CANDIDATES_HEAP_OFFSET, max_index);
     }
     candidates_count--;
 
-    return ScoredPoint(
-        subgroupBroadcast(popped_value.id, 0),
-        subgroupBroadcast(popped_value.score, 0)
-    );
+    return popped_value;
 }
 
 bool push_candidate(ScoredPoint scored_point) {
     if (candidates_count == CANDIDATES_HEAP_CAPACITY) {
         if (scored_point.score > bheap_top(CANDIDATES_HEAP_OFFSET).score) {
-            if (subgroupElect()) {
-                bheap_change_top(CANDIDATES_HEAP_CAPACITY, candidates_count, scored_point);
-            }
+            bheap_change_top(CANDIDATES_HEAP_CAPACITY, candidates_count, scored_point);
         }
     } else {
-        if (subgroupElect()) {
-            bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, scored_point);
-        }
-        candidates_count++;
+        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, scored_point);
     }
     return true;
 }
