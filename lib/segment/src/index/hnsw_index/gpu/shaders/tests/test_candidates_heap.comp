@@ -5,7 +5,7 @@
 #include "common.comp"
 layout(local_size_x = SUBGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
-#define SHARED_BUFFER_CAPACITY CANDIDATES_HEAP_CAPACITY
+#define SHARED_BUFFER_CAPACITY EF
 #define CANDIDATES_HEAP_OFFSET 0
 
 #include "shared_buffer.comp"
@@ -32,7 +32,7 @@ void main() {
     for (uint i = 0; i < test_params.input_counts; i++) {
         uint point_index = subgroup_index * test_params.input_counts + i;
         ScoredPoint point = input_points.data[point_index];
-        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, point);
+        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, EF, point);
     }
 
     while (candidates_count > 0) {
@@ -42,7 +42,7 @@ void main() {
     for (uint i = 0; i < test_params.input_counts; i++) {
         uint point_index = subgroup_index * test_params.input_counts + i;
         ScoredPoint point = input_points.data[point_index];
-        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, point);
+        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, EF, point);
     }
 
     uint output_index = subgroup_index * test_params.input_counts;

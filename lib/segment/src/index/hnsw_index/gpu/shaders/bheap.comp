@@ -10,21 +10,11 @@ ScoredPoint bheap_top(uint offset) {
     return shared_buffer[offset];
 }
 
-uint _heap_find_max(uint offset, uint size, bool invert) {
+uint _heap_find_max(uint offset, uint size) {
     ScoredPoint max_scored_point = ScoredPoint(0, negative_infinity);
-    if (invert) {
-        max_scored_point.score = positive_infinity;
-    }
-
     uint max_index = 0;
     for (uint i = gl_SubgroupInvocationID; i < size; i += SUBGROUP_SIZE) {
-        bool is_large = false;
-        if (invert) {
-            is_large = shared_buffer[offset + i].score < max_scored_point.score;
-        } else {
-            is_large = shared_buffer[offset + i].score > max_scored_point.score;
-        }
-
+        bool is_large = shared_buffer[offset + i].score > max_scored_point.score;
         if (is_large) {
             max_scored_point = shared_buffer[offset + i];
             max_index = i;
@@ -38,11 +28,29 @@ uint _heap_find_max(uint offset, uint size, bool invert) {
     return subgroupShuffle(max_index, subgroup_max_thread);
 }
 
+uint _heap_find_min(uint offset, uint size) {
+    ScoredPoint min_scored_point = ScoredPoint(0, positive_infinity);
+    uint min_index = 0;
+    for (uint i = gl_SubgroupInvocationID; i < size; i += SUBGROUP_SIZE) {
+        bool is_less = shared_buffer[offset + i].score < min_scored_point.score;
+        if (is_less) {
+            min_scored_point = shared_buffer[offset + i];
+            min_index = i;
+        }
+    }
+
+    float subgroup_smallest = subgroupMin(min_scored_point.score);
+    bool is_min_thread = min_scored_point.score == subgroup_smallest;
+    uvec4 subgroup_min_threads = subgroupBallot(is_min_thread);
+    uint subgroup_min_thread = subgroupBallotFindLSB(subgroup_min_threads);
+    return subgroupShuffle(min_index, subgroup_min_thread);
+}
+
 bool bheap_push(uint offset, in out uint size, uint capacity, ScoredPoint score) {
     if (size == capacity) {
         if (score.score > shared_buffer[offset].score) {
             shared_buffer[offset] = score;
-            uint min_index = _heap_find_max(offset, size, true);
+            uint min_index = _heap_find_min(offset, size);
             if (subgroupElect()) {
                 shared_buffer[offset] = shared_buffer[offset + min_index];
                 shared_buffer[offset + min_index] = score;
@@ -71,7 +79,7 @@ ScoredPoint bheap_pop_max(uint offset, in out uint size) {
         return ScoredPoint(0, 0.0);
     }
 
-    uint max_index = _heap_find_max(offset, size, false);
+    uint max_index = _heap_find_max(offset, size);
     ScoredPoint popped_value = shared_buffer[offset + max_index];
 
     if (subgroupElect()) {

@@ -5,9 +5,7 @@ use std::sync::Arc;
 use common::types::{PointOffsetType, ScoredPointOffset};
 use itertools::Itertools;
 
-use super::gpu_candidates_heap::GpuCandidatesHeap;
 use super::gpu_links::GpuLinks;
-use super::gpu_nearest_heap::GpuNearestHeap;
 use super::gpu_vector_storage::GpuVectorStorage;
 use super::gpu_visited_flags::GpuVisitedFlags;
 use super::shader_builder::ShaderBuilderParameters;
@@ -37,8 +35,6 @@ pub struct GpuSearchContext {
     pub groups_count: usize,
     pub gpu_vector_storage: GpuVectorStorage,
     pub gpu_links: GpuLinks,
-    pub gpu_nearest_heap: GpuNearestHeap,
-    pub gpu_candidates_heap: GpuCandidatesHeap,
     pub gpu_visited_flags: GpuVisitedFlags,
     pub is_dirty_links: bool,
 
@@ -67,23 +63,37 @@ pub struct GpuSearchContext {
     pub updates_count: usize,
     pub patches_timer: std::time::Duration,
     pub patches_count: usize,
+
     pub exact: bool,
+    pub ef: usize,
 }
 
 struct GpuSearchContextParams {
     exact: bool,
+    ef: usize,
 }
 
 impl ShaderBuilderParameters for GpuSearchContextParams {
     fn shader_includes(&self) -> HashMap<String, String> {
-        HashMap::from([(
-            "search_context.comp".to_string(),
-            include_str!("shaders/search_context.comp").to_string(),
-        )])
+        HashMap::from([
+            (
+                "shared_buffer.comp".to_string(),
+                include_str!("shaders/shared_buffer.comp").to_string(),
+            ),
+            (
+                "bheap.comp".to_string(),
+                include_str!("shaders/bheap.comp").to_string(),
+            ),
+            (
+                "search_context.comp".to_string(),
+                include_str!("shaders/search_context.comp").to_string(),
+            ),
+        ])
     }
 
     fn shader_defines(&self) -> HashMap<String, Option<String>> {
         let mut defines = HashMap::new();
+        defines.insert("EF".to_owned(), Some(self.ef.to_string()));
         if self.exact {
             defines.insert("EXACT".to_owned(), None);
         }
@@ -93,8 +103,6 @@ impl ShaderBuilderParameters for GpuSearchContextParams {
 
 struct GpuSearchContextGroupAllocation {
     groups_count: usize,
-    gpu_nearest_heap: GpuNearestHeap,
-    gpu_candidates_heap: GpuCandidatesHeap,
     gpu_visited_flags: GpuVisitedFlags,
     upload_staging_buffer: Arc<gpu::Buffer>,
     download_staging_buffer: Arc<gpu::Buffer>,
@@ -121,7 +129,7 @@ impl GpuSearchContext {
         stopped: &AtomicBool,
     ) -> OperationResult<Self> {
         let points_count = vector_storage.total_vector_count();
-        let search_context_params = GpuSearchContextParams { exact };
+        let search_context_params = GpuSearchContextParams { exact, ef };
 
         let gpu_vector_storage = GpuVectorStorage::new(
             device.clone(),
@@ -135,8 +143,6 @@ impl GpuSearchContext {
         let allocation_timer = std::time::Instant::now();
         let GpuSearchContextGroupAllocation {
             groups_count,
-            gpu_nearest_heap,
-            gpu_candidates_heap,
             gpu_visited_flags,
             upload_staging_buffer,
             download_staging_buffer,
@@ -155,8 +161,6 @@ impl GpuSearchContext {
         let greedy_search_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/run_greedy_search.comp"))
             .with_parameters(&gpu_vector_storage)
-            .with_parameters(&gpu_nearest_heap)
-            .with_parameters(&gpu_candidates_heap)
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
@@ -165,8 +169,6 @@ impl GpuSearchContext {
         let insert_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/run_insert_vector.comp"))
             .with_parameters(&gpu_vector_storage)
-            .with_parameters(&gpu_nearest_heap)
-            .with_parameters(&gpu_candidates_heap)
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
@@ -175,8 +177,6 @@ impl GpuSearchContext {
         let search_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/tests/test_hnsw_search.comp"))
             .with_parameters(&gpu_vector_storage)
-            .with_parameters(&gpu_nearest_heap)
-            .with_parameters(&gpu_candidates_heap)
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
@@ -185,8 +185,6 @@ impl GpuSearchContext {
         let patches_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/run_get_patch.comp"))
             .with_parameters(&gpu_vector_storage)
-            .with_parameters(&gpu_nearest_heap)
-            .with_parameters(&gpu_candidates_heap)
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
@@ -276,8 +274,6 @@ impl GpuSearchContext {
         Ok(Self {
             gpu_vector_storage,
             gpu_links,
-            gpu_nearest_heap,
-            gpu_candidates_heap,
             gpu_visited_flags,
             device,
             context,
@@ -303,6 +299,7 @@ impl GpuSearchContext {
             patches_timer: Default::default(),
             patches_count: 0,
             exact,
+            ef,
         })
     }
 
@@ -354,9 +351,6 @@ impl GpuSearchContext {
             groups_count * std::mem::size_of::<PointOffsetType>(),
         )?;
 
-        let gpu_nearest_heap = GpuNearestHeap::new(device.clone(), ef, std::cmp::max(ef, m0 + 1))?;
-        let gpu_candidates_heap =
-            GpuCandidatesHeap::new(device.clone(), std::cmp::max(ef, m0 + 1))?;
         let gpu_visited_flags = GpuVisitedFlags::new(
             device.clone(),
             groups_count,
@@ -399,8 +393,6 @@ impl GpuSearchContext {
 
         Ok(GpuSearchContextGroupAllocation {
             groups_count,
-            gpu_nearest_heap,
-            gpu_candidates_heap,
             gpu_visited_flags,
             upload_staging_buffer,
             download_staging_buffer,
@@ -478,15 +470,14 @@ impl GpuSearchContext {
             self.download_staging_buffer.clone(),
             0,
             0,
-            requests.len() * self.gpu_nearest_heap.ef * std::mem::size_of::<ScoredPointOffset>(),
+            requests.len() * self.ef * std::mem::size_of::<ScoredPointOffset>(),
         )?;
         self.run_context()?;
-        let mut gpu_responses =
-            vec![ScoredPointOffset::default(); requests.len() * self.gpu_nearest_heap.ef];
+        let mut gpu_responses = vec![ScoredPointOffset::default(); requests.len() * self.ef];
         self.download_staging_buffer
             .download_slice(&mut gpu_responses, 0)?;
         Ok(gpu_responses
-            .chunks(self.gpu_nearest_heap.ef)
+            .chunks(self.ef)
             .map(|r| {
                 r.iter()
                     .take_while(|s| s.idx != PointOffsetType::MAX)
@@ -880,7 +871,7 @@ mod tests {
             gpu_search_context,
             vector_holder,
             graph_layers_builder,
-            gpu_search_context_params: GpuSearchContextParams { exact: true },
+            gpu_search_context_params: GpuSearchContextParams { exact: true, ef },
         }
     }
 
@@ -1115,8 +1106,6 @@ mod tests {
         let shader = ShaderBuilder::new(test.gpu_search_context.device.clone())
             .with_shader_code(include_str!("shaders/tests/test_heuristic.comp"))
             .with_parameters(&test.gpu_search_context.gpu_vector_storage)
-            .with_parameters(&test.gpu_search_context.gpu_nearest_heap)
-            .with_parameters(&test.gpu_search_context.gpu_candidates_heap)
             .with_parameters(&test.gpu_search_context.gpu_links)
             .with_parameters(&test.gpu_search_context.gpu_visited_flags)
             .with_parameters(&test.gpu_search_context_params)

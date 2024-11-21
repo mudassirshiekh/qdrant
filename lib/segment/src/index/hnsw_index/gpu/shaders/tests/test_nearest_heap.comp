@@ -5,7 +5,7 @@
 #include "common.comp"
 layout(local_size_x = SUBGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
-#define SHARED_BUFFER_CAPACITY NEAREST_HEAP_CAPACITY
+#define SHARED_BUFFER_CAPACITY EF
 #define NEAREST_HEAP_OFFSET 0
 
 #include "shared_buffer.comp"
@@ -36,7 +36,7 @@ void main() {
     for (uint i = 0; i < test_params.input_counts; i++) {
         uint point_index = subgroup_index * test_params.input_counts + i;
         ScoredPoint point = input_points.data[point_index];
-        bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_EF, point);
+        bheap_push(NEAREST_HEAP_OFFSET, nearest_count, EF, point);
 
         groupMemoryBarrier();
         memoryBarrier();
@@ -54,8 +54,8 @@ void main() {
 
     sort(NEAREST_HEAP_OFFSET, nearest_count);
     if (subgroupElect()) {
-        for (uint i = 0; i < NEAREST_HEAP_EF; i++) {
-            uint point_index = subgroup_index * NEAREST_HEAP_EF + i;
+        for (uint i = 0; i < EF; i++) {
+            uint point_index = subgroup_index * EF + i;
             sorted_output.data[point_index] = shared_buffer[NEAREST_HEAP_OFFSET + i].id;
         }
     }

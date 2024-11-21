@@ -42,7 +42,7 @@ void main() {
     barrier();
 
     if (subgroupElect()) {
-        uint result_index_offset = NEAREST_HEAP_EF * subgroup_index;
+        uint result_index_offset = EF * subgroup_index;
         for (uint i = 0; i < count; i++) {
             search_results.data[result_index_offset + i] = shared_buffer[NEAREST_HEAP_OFFSET + i];
         }

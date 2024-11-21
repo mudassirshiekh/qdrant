@@ -1,15 +1,16 @@
 pub mod batched_points;
 pub mod cpu_level_builder;
 pub mod devices_manager;
-pub mod gpu_candidates_heap;
 pub mod gpu_graph_builder;
 pub mod gpu_level_builder;
 pub mod gpu_links;
-pub mod gpu_nearest_heap;
 pub mod gpu_search_context;
 pub mod gpu_vector_storage;
 pub mod gpu_visited_flags;
 pub mod shader_builder;
+
+#[cfg(test)]
+mod gpu_tests;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;

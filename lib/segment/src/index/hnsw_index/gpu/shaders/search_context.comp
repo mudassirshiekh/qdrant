@@ -1,9 +1,9 @@
 #ifndef SEARCH_CONTEXT_HEADER
 #define SEARCH_CONTEXT_HEADER
 
-#define SHARED_BUFFER_CAPACITY NEAREST_HEAP_CAPACITY + CANDIDATES_HEAP_CAPACITY
+#define SHARED_BUFFER_CAPACITY (2 * EF)
 #define NEAREST_HEAP_OFFSET 0
-#define CANDIDATES_HEAP_OFFSET NEAREST_HEAP_CAPACITY
+#define CANDIDATES_HEAP_OFFSET EF
 
 #include "common.comp"
 #include "shared_buffer.comp"
@@ -17,9 +17,9 @@ uint candidates_count = 0;
 
 void process_candidate(ScoredPoint scored_point) {
     bool not_presented = bheap_top(NEAREST_HEAP_OFFSET).id != scored_point.id;
-    bool was_added = bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_EF, scored_point);
+    bool was_added = bheap_push(NEAREST_HEAP_OFFSET, nearest_count, EF, scored_point);
     if (was_added && not_presented) {
-        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, scored_point);
+        bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, EF, scored_point);
         subgroupMemoryBarrierShared();
     }
 }
@@ -90,8 +90,8 @@ uint search(POINT_ID point_id, ScoredPoint entry) {
         mark_visited(point_id);
         mark_visited(entry.id);
     }
-    bheap_push(NEAREST_HEAP_OFFSET, nearest_count, NEAREST_HEAP_EF, entry);
-    bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, CANDIDATES_HEAP_CAPACITY, entry);
+    bheap_push(NEAREST_HEAP_OFFSET, nearest_count, EF, entry);
+    bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, EF, entry);
     groupMemoryBarrier();
     
     while (candidates_count > 0) {
