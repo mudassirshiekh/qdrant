@@ -79,7 +79,7 @@ impl SegmentBuilder {
         };
 
         let payload_storage =
-            create_payload_storage(database.clone(), segment_config, segment_path)?;
+            create_payload_storage(database.clone(), segment_config, temp_dir.path())?;
 
         let mut vector_storages = HashMap::new();
 
