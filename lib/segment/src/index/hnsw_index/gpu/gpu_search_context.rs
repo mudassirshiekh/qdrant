@@ -51,10 +51,6 @@ pub struct GpuSearchContext {
     pub search_descriptor_set: Arc<gpu::DescriptorSet>,
     pub search_pipeline: Arc<gpu::Pipeline>,
 
-    pub patches_responses_buffer: Arc<gpu::Buffer>,
-    pub patches_descriptor_set: Arc<gpu::DescriptorSet>,
-    pub patches_pipeline: Arc<gpu::Pipeline>,
-
     pub insert_atomics_buffer: Arc<gpu::Buffer>,
     pub insert_descriptor_set: Arc<gpu::DescriptorSet>,
     pub insert_pipeline: Arc<gpu::Pipeline>,
@@ -109,7 +105,6 @@ struct GpuSearchContextGroupAllocation {
     requests_buffer: Arc<gpu::Buffer>,
     responses_buffer: Arc<gpu::Buffer>,
     search_responses_buffer: Arc<gpu::Buffer>,
-    patches_responses_buffer: Arc<gpu::Buffer>,
     insert_atomics_buffer: Arc<gpu::Buffer>,
 }
 
@@ -149,7 +144,6 @@ impl GpuSearchContext {
             requests_buffer,
             responses_buffer,
             search_responses_buffer,
-            patches_responses_buffer,
             insert_atomics_buffer,
         } = Self::allocate_grouped_data(device.clone(), max_groups_count, points_count, ef, m0)
             .map_err(|_| OperationError::service_error("Failed to allocate gpu data"))?;
@@ -180,15 +174,7 @@ impl GpuSearchContext {
             .with_parameters(&gpu_links)
             .with_parameters(&gpu_visited_flags)
             .with_parameters(&search_context_params)
-            .build("test_hnsw_search.comp")?;
-
-        let patches_shader = ShaderBuilder::new(device.clone())
-            .with_shader_code(include_str!("shaders/run_get_patch.comp"))
-            .with_parameters(&gpu_vector_storage)
-            .with_parameters(&gpu_links)
-            .with_parameters(&gpu_visited_flags)
-            .with_parameters(&search_context_params)
-            .build("run_get_patch.comp")?;
+            .build("tests/test_hnsw_search.comp")?;
 
         let greedy_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
             .add_storage_buffer(0)
@@ -205,7 +191,7 @@ impl GpuSearchContext {
             .add_descriptor_set_layout(0, greedy_descriptor_set_layout.clone())
             .add_descriptor_set_layout(1, gpu_vector_storage.descriptor_set_layout())
             .add_descriptor_set_layout(2, gpu_links.descriptor_set_layout.clone())
-            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout.clone())
+            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout())
             .add_shader(greedy_search_shader.clone())
             .build(device.clone())?;
 
@@ -224,29 +210,8 @@ impl GpuSearchContext {
             .add_descriptor_set_layout(0, search_descriptor_set_layout.clone())
             .add_descriptor_set_layout(1, gpu_vector_storage.descriptor_set_layout())
             .add_descriptor_set_layout(2, gpu_links.descriptor_set_layout.clone())
-            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout.clone())
+            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout())
             .add_shader(search_shader.clone())
-            .build(device.clone())?;
-
-        let patches_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
-            .add_storage_buffer(0)
-            .add_storage_buffer(1)
-            .add_storage_buffer(2)
-            .build(device.clone())?;
-
-        let patches_descriptor_set =
-            gpu::DescriptorSet::builder(patches_descriptor_set_layout.clone())
-                .add_storage_buffer(0, requests_buffer.clone())
-                .add_storage_buffer(1, patches_responses_buffer.clone())
-                .add_storage_buffer(2, responses_buffer.clone())
-                .build()?;
-
-        let patches_pipeline = gpu::Pipeline::builder()
-            .add_descriptor_set_layout(0, patches_descriptor_set_layout.clone())
-            .add_descriptor_set_layout(1, gpu_vector_storage.descriptor_set_layout())
-            .add_descriptor_set_layout(2, gpu_links.descriptor_set_layout.clone())
-            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout.clone())
-            .add_shader(patches_shader.clone())
             .build(device.clone())?;
 
         let insert_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
@@ -266,7 +231,7 @@ impl GpuSearchContext {
             .add_descriptor_set_layout(0, insert_descriptor_set_layout.clone())
             .add_descriptor_set_layout(1, gpu_vector_storage.descriptor_set_layout())
             .add_descriptor_set_layout(2, gpu_links.descriptor_set_layout.clone())
-            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout.clone())
+            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout())
             .add_shader(insert_shader.clone())
             .build(device.clone())?;
 
@@ -288,9 +253,6 @@ impl GpuSearchContext {
             search_responses_buffer,
             search_descriptor_set,
             search_pipeline,
-            patches_responses_buffer,
-            patches_descriptor_set,
-            patches_pipeline,
             insert_atomics_buffer,
             insert_descriptor_set,
             insert_pipeline,
@@ -351,19 +313,11 @@ impl GpuSearchContext {
             groups_count * std::mem::size_of::<PointOffsetType>(),
         )?;
 
-        let gpu_visited_flags = GpuVisitedFlags::new(
-            device.clone(),
-            groups_count,
-            (points_count as f32 / visited_flags_factor) as usize,
-        )?;
-
-        // todo(gpu): remove this buffer
-        let patches_responses_buffer = gpu::Buffer::new(
-            device.clone(),
-            "Patch responses buffer",
-            gpu::BufferType::Storage,
-            groups_count * ((m0 + 1) * (m0 + 2)) * std::mem::size_of::<PointOffsetType>(),
-        )?;
+        // TODO(gpu): use true remap
+        let remap =
+            (0..(points_count as f32 / visited_flags_factor) as PointOffsetType).collect_vec();
+        let gpu_visited_flags =
+            GpuVisitedFlags::new(device.clone(), groups_count, remap.as_slice())?;
 
         let upload_staging_buffer = gpu::Buffer::new(
             device.clone(),
@@ -375,7 +329,9 @@ impl GpuSearchContext {
             device.clone(),
             "Search context download staging buffer",
             gpu::BufferType::GpuToCpu,
-            patches_responses_buffer.size() + responses_buffer.size(),
+            // TODO(gpu): simplify
+            (groups_count * ((m0 + 1) * (m0 + 2)) * std::mem::size_of::<PointOffsetType>())
+                + responses_buffer.size(),
         )?;
 
         let search_responses_buffer = gpu::Buffer::new(
@@ -399,7 +355,6 @@ impl GpuSearchContext {
             requests_buffer,
             responses_buffer,
             search_responses_buffer,
-            patches_responses_buffer,
             insert_atomics_buffer,
         })
     }
@@ -458,7 +413,7 @@ impl GpuSearchContext {
                 self.search_descriptor_set.clone(),
                 self.gpu_vector_storage.descriptor_set(),
                 self.gpu_links.descriptor_set.clone(),
-                self.gpu_visited_flags.descriptor_set.clone(),
+                self.gpu_visited_flags.descriptor_set(),
             ],
         )?;
         self.context.dispatch(requests.len(), 1, 1)?;
@@ -532,7 +487,7 @@ impl GpuSearchContext {
                 self.greedy_descriptor_set.clone(),
                 self.gpu_vector_storage.descriptor_set(),
                 self.gpu_links.descriptor_set.clone(),
-                self.gpu_visited_flags.descriptor_set.clone(),
+                self.gpu_visited_flags.descriptor_set(),
             ],
         )?;
         self.context.dispatch(requests.len(), 1, 1)?;
@@ -568,7 +523,7 @@ impl GpuSearchContext {
         self.gpu_visited_flags.clear(&mut self.context)?;
 
         // clear atomics
-        if self.gpu_visited_flags.params.generation == 1 {
+        if self.gpu_visited_flags.generation() == 1 {
             self.context
                 .clear_buffer(self.insert_atomics_buffer.clone())?;
         }
@@ -601,7 +556,7 @@ impl GpuSearchContext {
                 self.insert_descriptor_set.clone(),
                 self.gpu_vector_storage.descriptor_set(),
                 self.gpu_links.descriptor_set.clone(),
-                self.gpu_visited_flags.descriptor_set.clone(),
+                self.gpu_visited_flags.descriptor_set(),
             ],
         )?;
         self.context.dispatch(requests.len(), 1, 1)?;
@@ -620,6 +575,7 @@ impl GpuSearchContext {
         }
     }
 
+    /*
     pub fn run_get_patch(
         &mut self,
         requests: &[GpuRequest],
@@ -649,7 +605,7 @@ impl GpuSearchContext {
                 self.patches_descriptor_set.clone(),
                 self.gpu_vector_storage.descriptor_set(),
                 self.gpu_links.descriptor_set.clone(),
-                self.gpu_visited_flags.descriptor_set.clone(),
+                self.gpu_visited_flags.descriptor_set(),
             ],
         )?;
         self.context.dispatch(requests.len(), 1, 1)?;
@@ -712,6 +668,7 @@ impl GpuSearchContext {
 
         Ok((all_patches, new_entries))
     }
+     */
 
     pub fn set_links(
         &mut self,
@@ -983,6 +940,7 @@ mod tests {
         }
     }
 
+    /*
     #[test]
     fn test_gpu_hnsw_patch() {
         let _ = env_logger::builder()
@@ -1031,6 +989,7 @@ mod tests {
             }
         }
     }
+     */
 
     #[test]
     fn test_gpu_heuristic() {
@@ -1143,8 +1102,7 @@ mod tests {
                 3,
                 test.gpu_search_context
                     .gpu_visited_flags
-                    .descriptor_set_layout
-                    .clone(),
+                    .descriptor_set_layout(),
             )
             .add_shader(shader.clone())
             .build(test.gpu_search_context.device.clone())
@@ -1158,10 +1116,7 @@ mod tests {
                     descriptor_set.clone(),
                     test.gpu_search_context.gpu_vector_storage.descriptor_set(),
                     test.gpu_search_context.gpu_links.descriptor_set.clone(),
-                    test.gpu_search_context
-                        .gpu_visited_flags
-                        .descriptor_set
-                        .clone(),
+                    test.gpu_search_context.gpu_visited_flags.descriptor_set(),
                 ],
             )
             .unwrap();

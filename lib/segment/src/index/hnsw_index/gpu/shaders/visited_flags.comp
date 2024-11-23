@@ -18,20 +18,30 @@ buffer VisitedFlagsBuffer {
     uint8_t data[];
 } visited_flags;
 
+#if VISITED_FLAGS_REMAP
+layout(set = VISITED_FLAGS_LAYOUT_SET, binding = 2)
+buffer VisitedFlagsRemapBuffer {
+    uint data[];
+} visited_flags_remap;
+#endif
+
 #define BYTE_MASK 0xFF
 #define VISITED_GENERATION visited_flags_params.generation
 
-bool is_visited(POINT_ID point_id) {
+bool check_visited(POINT_ID point_id) {
+    #if VISITED_FLAGS_REMAP
+    point_id = visited_flags_remap.data[point_id];
+    #endif
+
     uint subgroup_index = SUBGROUP_ID;
     uint index = subgroup_index * VISITED_FLAGS_CAPACITY + point_id % VISITED_FLAGS_CAPACITY;
     uint prev_generation = uint(visited_flags.data[index]);
-    return prev_generation == VISITED_GENERATION;
-}
-
-void mark_visited(POINT_ID point_id) {
-    uint subgroup_index = SUBGROUP_ID;
-    uint index = subgroup_index * VISITED_FLAGS_CAPACITY + point_id % VISITED_FLAGS_CAPACITY;
-    visited_flags.data[index] = uint8_t(VISITED_GENERATION);
+    if (prev_generation == VISITED_GENERATION) {
+        return true;
+    } else {
+        visited_flags.data[index] = uint8_t(VISITED_GENERATION);
+        return false;
+    }
 }
 
 #endif

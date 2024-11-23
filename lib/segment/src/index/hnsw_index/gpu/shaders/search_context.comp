@@ -33,10 +33,7 @@ void process_candidate(POINT_ID candidate_id) {
     for (uint i = 0; i < links_count; i++) {
         if (i % SUBGROUP_SIZE == 0 && i + invocation < links_count) {
             subgroup_link = GET_LINK(candidate_id, i + invocation);
-            subgroup_is_visited = is_visited(subgroup_link);
-            if (!subgroup_is_visited) {
-                mark_visited(subgroup_link);
-            }
+            subgroup_is_visited = check_visited(subgroup_link);
         }
 
         uint link = subgroupShuffle(subgroup_link, i % SUBGROUP_SIZE);
@@ -87,8 +84,8 @@ uint search(POINT_ID point_id, ScoredPoint entry) {
 #endif
 
     if (subgroupElect()) {
-        mark_visited(point_id);
-        mark_visited(entry.id);
+        check_visited(point_id);
+        check_visited(entry.id);
     }
     bheap_push(NEAREST_HEAP_OFFSET, nearest_count, EF, entry);
     bheap_push(CANDIDATES_HEAP_OFFSET, candidates_count, EF, entry);
