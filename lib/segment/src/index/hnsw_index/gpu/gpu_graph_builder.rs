@@ -1,18 +1,15 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
 use common::types::PointOffsetType;
-use parking_lot::Mutex;
-use rayon::ThreadPool;
 
 use crate::common::operation_error::OperationResult;
 use crate::index::hnsw_index::gpu::batched_points::BatchedPoints;
-use crate::index::hnsw_index::gpu::cpu_level_builder::build_level_on_cpu;
 use crate::index::hnsw_index::gpu::create_graph_layers_builder;
 use crate::index::hnsw_index::gpu::gpu_level_builder::build_level_on_gpu;
 use crate::index::hnsw_index::gpu::gpu_search_context::GpuSearchContext;
 use crate::index::hnsw_index::graph_layers_builder::GraphLayersBuilder;
+use crate::index::hnsw_index::point_scorer::FilteredScorer;
 use crate::payload_storage::FilterContext;
 use crate::vector_storage::quantized::quantized_vectors::QuantizedVectors;
 use crate::vector_storage::{RawScorer, VectorStorageEnum};
@@ -20,7 +17,6 @@ use crate::vector_storage::{RawScorer, VectorStorageEnum};
 #[allow(clippy::too_many_arguments)]
 pub fn build_hnsw_on_gpu<'a>(
     device: Arc<gpu::Device>,
-    pool: &ThreadPool,
     reference_graph: &GraphLayersBuilder,
     max_groups_count: usize,
     vector_storage: &VectorStorageEnum,
@@ -43,7 +39,7 @@ pub fn build_hnsw_on_gpu<'a>(
     let m0 = reference_graph.m0;
     let ef = reference_graph.ef_construct;
 
-    let gpu_search_context = Arc::new(Mutex::new(GpuSearchContext::new(
+    let mut gpu_search_context = GpuSearchContext::new(
         device,
         max_groups_count,
         vector_storage,
@@ -55,101 +51,39 @@ pub fn build_hnsw_on_gpu<'a>(
         force_half_precision,
         exact,
         stopped,
-    )?));
+    )?;
 
-    let batched_points = Arc::new(BatchedPoints::new(
+    let batched_points = BatchedPoints::new(
         |point_id| reference_graph.get_point_level(point_id),
         ids,
-        gpu_search_context.lock().groups_count,
-    )?);
+        gpu_search_context.groups_count,
+    )?;
 
-    let graph_layers_builder = Arc::new(create_graph_layers_builder(
-        &batched_points,
-        num_vectors,
-        m,
-        m0,
-        ef,
-        entry_points_num,
-    )?);
+    let graph_layers_builder =
+        create_graph_layers_builder(&batched_points, num_vectors, m, m0, ef, entry_points_num)?;
 
-    let mut gpu_thread_handle: Option<JoinHandle<OperationResult<()>>> = None;
-    let gpu_built_points = Arc::new(AtomicUsize::new(batched_points.points.len()));
-
-    let cpu_stop_condition = |cpu_built_points| {
-        assert_ne!(cpu_built_points, batched_points.points.len());
-
-        // if CPU is faster than GPU, wait for GPU to catch up
-        while cpu_built_points >= gpu_built_points.load(std::sync::atomic::Ordering::Relaxed) {
-            log::trace!(
-                "Waiting for GPU to catch up (CPU ready {}, GPU ready {})",
-                cpu_built_points,
-                gpu_built_points.load(std::sync::atomic::Ordering::Relaxed)
-            );
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-
-        let is_gpu_ready = gpu_built_points.load(std::sync::atomic::Ordering::Relaxed)
-            == batched_points.points.len();
-        let min_required_points_reached = cpu_built_points >= min_cpu_linked_points_count;
-
-        // stop id GPU is ready and min required points are linked
-        min_required_points_reached && is_gpu_ready
-    };
-
-    for level in (0..batched_points.levels_count).rev() {
-        // Start building level on CPU
-        let gpu_start_index = build_level_on_cpu(
-            &pool,
-            &graph_layers_builder,
-            &batched_points,
-            level,
-            &cpu_stop_condition,
-            &points_scorer_builder,
-        )?;
-
-        // CPU is ready, finish prev level GPU thread to continue with this level
-        if let Some(handle) = gpu_thread_handle.take() {
-            handle.join().unwrap()?;
-        }
-
-        // Clear GPU built points counter
-        gpu_built_points.store(0, std::sync::atomic::Ordering::Relaxed);
-
-        log::debug!(
-            "Starting GPU level {}, skipped points {}",
-            level,
-            gpu_start_index
-        );
-
-        let gpu_search_context = gpu_search_context.clone();
-        let graph_layers_builder = graph_layers_builder.clone();
-        let batched_points = batched_points.clone();
-        let gpu_built_points = gpu_built_points.clone();
-        // Continue level building on GPU in separate thread
-        gpu_thread_handle = Some(std::thread::spawn(move || -> OperationResult<()> {
-            let mut gpu_search_context = gpu_search_context.lock();
-            gpu_search_context.upload_links(level, &graph_layers_builder)?;
-            build_level_on_gpu(
-                &mut gpu_search_context,
-                &batched_points,
-                gpu_start_index,
-                level,
-                |count| {
-                    gpu_built_points.store(count, std::sync::atomic::Ordering::Relaxed);
-                },
-            )?;
-            gpu_search_context.download_links(level, &graph_layers_builder)?;
-            Ok(())
-        }));
+    for i in 0..min_cpu_linked_points_count {
+        let point_id = batched_points.points[i].point_id;
+        let (raw_scorer, filter_context) = points_scorer_builder(point_id)?;
+        let points_scorer = FilteredScorer::new(raw_scorer.as_ref(), filter_context.as_deref());
+        graph_layers_builder.link_new_point(point_id, points_scorer);
+        raw_scorer.take_hardware_counter().discard_results();
     }
 
-    // Wait for the last GPU level
-    if let Some(handle) = gpu_thread_handle.take() {
-        handle.join().unwrap()?;
+    for level in (0..batched_points.levels_count).rev() {
+        log::debug!("Starting GPU level {}", level,);
+
+        gpu_search_context.upload_links(level, &graph_layers_builder)?;
+        build_level_on_gpu(
+            &mut gpu_search_context,
+            &batched_points,
+            min_cpu_linked_points_count,
+            level,
+        )?;
+        gpu_search_context.download_links(level, &graph_layers_builder)?;
     }
 
     {
-        let gpu_search_context = gpu_search_context.lock();
         log::debug!(
             "Gpu graph patches time: {:?}, count {:?}, avg {:?}",
             &gpu_search_context.patches_timer,
@@ -170,7 +104,7 @@ pub fn build_hnsw_on_gpu<'a>(
         );
     }
 
-    Ok(Arc::into_inner(graph_layers_builder).unwrap())
+    Ok(graph_layers_builder)
 }
 
 #[cfg(test)]
@@ -192,13 +126,6 @@ mod tests {
         exact: bool,
     ) -> GraphLayersBuilder {
         let num_vectors = test.graph_layers_builder.links_layers.len();
-
-        let pool = rayon::ThreadPoolBuilder::new()
-            .thread_name(|idx| format!("hnsw-build-{idx}"))
-            .num_threads(groups_count)
-            .build()
-            .unwrap();
-
         let debug_messenger = gpu::PanicIfErrorMessenger {};
         let instance = gpu::Instance::new(Some(&debug_messenger), None, false).unwrap();
         let device = gpu::Device::new(instance.clone(), &instance.physical_devices()[0]).unwrap();
@@ -206,7 +133,6 @@ mod tests {
         let ids = (0..num_vectors as PointOffsetType).collect();
         build_hnsw_on_gpu(
             device,
-            &pool,
             &test.graph_layers_builder,
             groups_count,
             &test.vector_storage.borrow(),

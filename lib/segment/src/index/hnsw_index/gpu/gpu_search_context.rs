@@ -23,12 +23,6 @@ pub struct GpuRequest {
     pub entry: PointOffsetType,
 }
 
-#[derive(Clone, Debug)]
-pub struct GpuGraphLinksPatch {
-    pub id: PointOffsetType,
-    pub links: Vec<PointOffsetType>,
-}
-
 pub struct GpuSearchContext {
     pub device: Arc<gpu::Device>,
     pub context: gpu::Context,
@@ -575,101 +569,6 @@ impl GpuSearchContext {
         }
     }
 
-    /*
-    pub fn run_get_patch(
-        &mut self,
-        requests: &[GpuRequest],
-    ) -> OperationResult<(Vec<Vec<GpuGraphLinksPatch>>, Vec<PointOffsetType>)> {
-        if requests.len() > self.groups_count {
-            return Err(OperationError::service_error("Too many gpu patch requests"));
-        }
-
-        if self.is_dirty() {
-            self.apply_links_patch().unwrap();
-        }
-        self.gpu_visited_flags.clear(&mut self.context)?;
-
-        self.upload_staging_buffer.upload_slice(requests, 0)?;
-        self.context.copy_gpu_buffer(
-            self.upload_staging_buffer.clone(),
-            self.requests_buffer.clone(),
-            0,
-            0,
-            std::mem::size_of_val(requests),
-        )?;
-        self.run_context()?;
-
-        self.context.bind_pipeline(
-            self.patches_pipeline.clone(),
-            &[
-                self.patches_descriptor_set.clone(),
-                self.gpu_vector_storage.descriptor_set(),
-                self.gpu_links.descriptor_set.clone(),
-                self.gpu_visited_flags.descriptor_set(),
-            ],
-        )?;
-        self.context.dispatch(requests.len(), 1, 1)?;
-
-        let timer = std::time::Instant::now();
-        self.run_context()?;
-        self.patches_timer += timer.elapsed();
-
-        // Download response
-        self.context.copy_gpu_buffer(
-            self.responses_buffer.clone(),
-            self.download_staging_buffer.clone(),
-            0,
-            0,
-            requests.len() * std::mem::size_of::<PointOffsetType>(),
-        )?;
-        self.context.copy_gpu_buffer(
-            self.patches_responses_buffer.clone(),
-            self.download_staging_buffer.clone(),
-            0,
-            self.responses_buffer.size(),
-            self.patches_responses_buffer.size(),
-        )?;
-        self.run_context()?;
-        let mut new_entries = vec![PointOffsetType::default(); requests.len()];
-        self.download_staging_buffer
-            .download_slice(&mut new_entries, 0)?;
-
-        let mut patches_data = vec![
-            PointOffsetType::default();
-            self.patches_responses_buffer.size()
-                / std::mem::size_of::<PointOffsetType>()
-        ];
-        self.download_staging_buffer
-            .download_slice(&mut patches_data, self.responses_buffer.size())?;
-
-        let m = self.gpu_links.m;
-        let mut all_patches = vec![];
-        for i in 0..requests.len() {
-            let patch_size = m + 2;
-            let all_patches_size = (m + 1) * patch_size;
-            let mut patches_offset = i * all_patches_size;
-
-            let mut patches = vec![];
-            for _ in 0..m + 1 {
-                let point_id = patches_data[patches_offset];
-                if point_id == PointOffsetType::MAX {
-                    break;
-                }
-                let links_count = patches_data[patches_offset + 1] as usize;
-                let links = &patches_data[patches_offset + 2..patches_offset + 2 + links_count];
-                patches.push(GpuGraphLinksPatch {
-                    id: point_id,
-                    links: links.to_vec(),
-                });
-                patches_offset += patch_size;
-            }
-            all_patches.push(patches);
-        }
-
-        Ok((all_patches, new_entries))
-    }
-     */
-
     pub fn set_links(
         &mut self,
         point_id: PointOffsetType,
@@ -939,57 +838,6 @@ mod tests {
             raw_scorer.take_hardware_counter().discard_results();
         }
     }
-
-    /*
-    #[test]
-    fn test_gpu_hnsw_patch() {
-        let _ = env_logger::builder()
-            .is_test(true)
-            .filter_level(log::LevelFilter::Trace)
-            .try_init();
-
-        let num_vectors = 1024;
-        let groups_count = 8;
-        let dim = 64;
-        let m = 16;
-        let ef = 32;
-
-        let mut test = create_test_data(num_vectors, groups_count, dim, m, ef);
-
-        // create request data
-        let mut requests = vec![];
-        for i in 0..groups_count {
-            requests.push(GpuRequest {
-                id: (num_vectors + i) as PointOffsetType,
-                entry: 0,
-            });
-        }
-
-        let (patches, new_entries) = test.gpu_search_context.run_get_patch(&requests).unwrap();
-
-        for (i, gpu_patches) in patches.iter().enumerate() {
-            let fake_filter_context = FakeFilterContext {};
-            let added_vector = test.vector_holder.vectors.get(num_vectors + i).to_vec();
-            let raw_scorer = test
-                .vector_holder
-                .get_raw_scorer(added_vector.clone())
-                .unwrap();
-            let mut scorer = FilteredScorer::new(raw_scorer.as_ref(), Some(&fake_filter_context));
-
-            let (cpu_patches, cpu_new_entry) =
-                test.graph_layers_builder
-                    .get_patch(requests[i], 0, &mut scorer);
-            raw_scorer.take_hardware_counter().discard_results();
-
-            assert_eq!(new_entries[i], *cpu_new_entry.first().unwrap());
-            assert_eq!(gpu_patches.len(), cpu_patches.len());
-            for (gpu_patch, cpu_patch) in gpu_patches.iter().zip(cpu_patches.iter()) {
-                assert_eq!(gpu_patch.id, cpu_patch.id);
-                assert_eq!(gpu_patch.links, cpu_patch.links);
-            }
-        }
-    }
-     */
 
     #[test]
     fn test_gpu_heuristic() {

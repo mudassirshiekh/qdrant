@@ -332,7 +332,6 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
 
                     Some(build_hnsw_on_gpu(
                         gpu_device.clone(),
-                        &pool,
                         &graph_layers_builder,
                         get_gpu_max_groups(),
                         &vector_storage,
@@ -571,7 +570,6 @@ impl<TGraphLinks: GraphLinks> HNSWIndex<TGraphLinks> {
                 };
                 Some(build_hnsw_on_gpu(
                     gpu_device.clone(),
-                    &pool,
                     &graph_layers_builder,
                     get_gpu_max_groups(),
                     &vector_storage,
