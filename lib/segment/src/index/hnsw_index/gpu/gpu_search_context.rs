@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use common::types::{PointOffsetType, ScoredPointOffset};
+use common::types::PointOffsetType;
 use itertools::Itertools;
 
 use super::gpu_links::GpuLinks;
@@ -40,10 +40,6 @@ pub struct GpuSearchContext {
 
     pub greedy_descriptor_set: Arc<gpu::DescriptorSet>,
     pub greedy_pipeline: Arc<gpu::Pipeline>,
-
-    pub search_responses_buffer: Arc<gpu::Buffer>,
-    pub search_descriptor_set: Arc<gpu::DescriptorSet>,
-    pub search_pipeline: Arc<gpu::Pipeline>,
 
     pub insert_atomics_buffer: Arc<gpu::Buffer>,
     pub insert_descriptor_set: Arc<gpu::DescriptorSet>,
@@ -98,7 +94,6 @@ struct GpuSearchContextGroupAllocation {
     download_staging_buffer: Arc<gpu::Buffer>,
     requests_buffer: Arc<gpu::Buffer>,
     responses_buffer: Arc<gpu::Buffer>,
-    search_responses_buffer: Arc<gpu::Buffer>,
     insert_atomics_buffer: Arc<gpu::Buffer>,
 }
 
@@ -137,7 +132,6 @@ impl GpuSearchContext {
             download_staging_buffer,
             requests_buffer,
             responses_buffer,
-            search_responses_buffer,
             insert_atomics_buffer,
         } = Self::allocate_grouped_data(device.clone(), max_groups_count, points_count, ef, m0)
             .map_err(|_| OperationError::service_error("Failed to allocate gpu data"))?;
@@ -162,14 +156,6 @@ impl GpuSearchContext {
             .with_parameters(&search_context_params)
             .build("run_insert_vector.comp")?;
 
-        let search_shader = ShaderBuilder::new(device.clone())
-            .with_shader_code(include_str!("shaders/tests/test_hnsw_search.comp"))
-            .with_parameters(&gpu_vector_storage)
-            .with_parameters(&gpu_links)
-            .with_parameters(&gpu_visited_flags)
-            .with_parameters(&search_context_params)
-            .build("tests/test_hnsw_search.comp")?;
-
         let greedy_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
             .add_storage_buffer(0)
             .add_storage_buffer(1)
@@ -187,25 +173,6 @@ impl GpuSearchContext {
             .add_descriptor_set_layout(2, gpu_links.descriptor_set_layout.clone())
             .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout())
             .add_shader(greedy_search_shader.clone())
-            .build(device.clone())?;
-
-        let search_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
-            .add_storage_buffer(0)
-            .add_storage_buffer(1)
-            .build(device.clone())?;
-
-        let search_descriptor_set =
-            gpu::DescriptorSet::builder(search_descriptor_set_layout.clone())
-                .add_storage_buffer(0, requests_buffer.clone())
-                .add_storage_buffer(1, search_responses_buffer.clone())
-                .build()?;
-
-        let search_pipeline = gpu::Pipeline::builder()
-            .add_descriptor_set_layout(0, search_descriptor_set_layout.clone())
-            .add_descriptor_set_layout(1, gpu_vector_storage.descriptor_set_layout())
-            .add_descriptor_set_layout(2, gpu_links.descriptor_set_layout.clone())
-            .add_descriptor_set_layout(3, gpu_visited_flags.descriptor_set_layout())
-            .add_shader(search_shader.clone())
             .build(device.clone())?;
 
         let insert_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
@@ -244,9 +211,6 @@ impl GpuSearchContext {
             responses_buffer,
             greedy_descriptor_set,
             greedy_pipeline,
-            search_responses_buffer,
-            search_descriptor_set,
-            search_pipeline,
             insert_atomics_buffer,
             insert_descriptor_set,
             insert_pipeline,
@@ -328,12 +292,6 @@ impl GpuSearchContext {
                 + responses_buffer.size(),
         )?;
 
-        let search_responses_buffer = gpu::Buffer::new(
-            device.clone(),
-            "Search responses buffer",
-            gpu::BufferType::Storage,
-            groups_count * ef * std::mem::size_of::<ScoredPointOffset>(),
-        )?;
         let insert_atomics_buffer = gpu::Buffer::new(
             device.clone(),
             "Insert atomics buffer",
@@ -348,7 +306,6 @@ impl GpuSearchContext {
             download_staging_buffer,
             requests_buffer,
             responses_buffer,
-            search_responses_buffer,
             insert_atomics_buffer,
         })
     }
@@ -374,66 +331,6 @@ impl GpuSearchContext {
         }
 
         Ok(gpu_responses)
-    }
-
-    pub fn search(
-        &mut self,
-        requests: &[GpuRequest],
-    ) -> OperationResult<Vec<Vec<ScoredPointOffset>>> {
-        if requests.len() > self.groups_count {
-            return Err(OperationError::service_error(
-                "Too many gpu greedy search requests",
-            ));
-        }
-
-        if self.is_dirty() {
-            self.apply_links_patch().unwrap();
-        }
-        self.gpu_visited_flags.clear(&mut self.context)?;
-
-        self.upload_staging_buffer.upload_slice(requests, 0)?;
-        self.context.copy_gpu_buffer(
-            self.upload_staging_buffer.clone(),
-            self.requests_buffer.clone(),
-            0,
-            0,
-            std::mem::size_of_val(requests),
-        )?;
-        self.run_context()?;
-
-        self.context.bind_pipeline(
-            self.search_pipeline.clone(),
-            &[
-                self.search_descriptor_set.clone(),
-                self.gpu_vector_storage.descriptor_set(),
-                self.gpu_links.descriptor_set.clone(),
-                self.gpu_visited_flags.descriptor_set(),
-            ],
-        )?;
-        self.context.dispatch(requests.len(), 1, 1)?;
-        self.run_context()?;
-
-        // Download response
-        self.context.copy_gpu_buffer(
-            self.search_responses_buffer.clone(),
-            self.download_staging_buffer.clone(),
-            0,
-            0,
-            requests.len() * self.ef * std::mem::size_of::<ScoredPointOffset>(),
-        )?;
-        self.run_context()?;
-        let mut gpu_responses = vec![ScoredPointOffset::default(); requests.len() * self.ef];
-        self.download_staging_buffer
-            .download_slice(&mut gpu_responses, 0)?;
-        Ok(gpu_responses
-            .chunks(self.ef)
-            .map(|r| {
-                r.iter()
-                    .take_while(|s| s.idx != PointOffsetType::MAX)
-                    .cloned()
-                    .collect_vec()
-            })
-            .collect_vec())
     }
 
     pub fn greedy_search(
@@ -746,6 +643,61 @@ mod tests {
 
         let mut test = create_test_data(num_vectors, groups_count, dim, m, ef);
 
+        let search_responses_buffer = gpu::Buffer::new(
+            test.gpu_search_context.device.clone(),
+            "Search responses buffer",
+            gpu::BufferType::Storage,
+            groups_count * ef * std::mem::size_of::<ScoredPointOffset>(),
+        )
+        .unwrap();
+
+        let search_shader = ShaderBuilder::new(test.gpu_search_context.device.clone())
+            .with_shader_code(include_str!("shaders/tests/test_hnsw_search.comp"))
+            .with_parameters(&test.gpu_search_context.gpu_vector_storage)
+            .with_parameters(&test.gpu_search_context.gpu_links)
+            .with_parameters(&test.gpu_search_context.gpu_visited_flags)
+            .with_parameters(&test.gpu_search_context_params)
+            .build("tests/test_hnsw_search.comp")
+            .unwrap();
+
+        let search_descriptor_set_layout = gpu::DescriptorSetLayout::builder()
+            .add_storage_buffer(0)
+            .add_storage_buffer(1)
+            .build(test.gpu_search_context.device.clone())
+            .unwrap();
+
+        let search_descriptor_set =
+            gpu::DescriptorSet::builder(search_descriptor_set_layout.clone())
+                .add_storage_buffer(0, test.gpu_search_context.requests_buffer.clone())
+                .add_storage_buffer(1, search_responses_buffer.clone())
+                .build()
+                .unwrap();
+
+        let search_pipeline = gpu::Pipeline::builder()
+            .add_descriptor_set_layout(0, search_descriptor_set_layout.clone())
+            .add_descriptor_set_layout(
+                1,
+                test.gpu_search_context
+                    .gpu_vector_storage
+                    .descriptor_set_layout(),
+            )
+            .add_descriptor_set_layout(
+                2,
+                test.gpu_search_context
+                    .gpu_links
+                    .descriptor_set_layout
+                    .clone(),
+            )
+            .add_descriptor_set_layout(
+                3,
+                test.gpu_search_context
+                    .gpu_visited_flags
+                    .descriptor_set_layout(),
+            )
+            .add_shader(search_shader.clone())
+            .build(test.gpu_search_context.device.clone())
+            .unwrap();
+
         // create request data
         let mut search_requests = vec![];
         for i in 0..groups_count {
@@ -755,10 +707,77 @@ mod tests {
             });
         }
 
-        let gpu_responses_1 = test.gpu_search_context.search(&search_requests).unwrap();
+        let mut search = |requests: &[GpuRequest]| {
+            test.gpu_search_context
+                .gpu_visited_flags
+                .clear(&mut test.gpu_search_context.context)
+                .unwrap();
+            test.gpu_search_context
+                .upload_staging_buffer
+                .upload_slice(requests, 0)
+                .unwrap();
+            test.gpu_search_context
+                .context
+                .copy_gpu_buffer(
+                    test.gpu_search_context.upload_staging_buffer.clone(),
+                    test.gpu_search_context.requests_buffer.clone(),
+                    0,
+                    0,
+                    std::mem::size_of_val(requests),
+                )
+                .unwrap();
+            test.gpu_search_context.run_context().unwrap();
+
+            test.gpu_search_context
+                .context
+                .bind_pipeline(
+                    search_pipeline.clone(),
+                    &[
+                        search_descriptor_set.clone(),
+                        test.gpu_search_context.gpu_vector_storage.descriptor_set(),
+                        test.gpu_search_context.gpu_links.descriptor_set.clone(),
+                        test.gpu_search_context.gpu_visited_flags.descriptor_set(),
+                    ],
+                )
+                .unwrap();
+            test.gpu_search_context
+                .context
+                .dispatch(requests.len(), 1, 1)
+                .unwrap();
+            test.gpu_search_context.run_context().unwrap();
+
+            // Download response
+            test.gpu_search_context
+                .context
+                .copy_gpu_buffer(
+                    search_responses_buffer.clone(),
+                    test.gpu_search_context.download_staging_buffer.clone(),
+                    0,
+                    0,
+                    requests.len() * ef * std::mem::size_of::<ScoredPointOffset>(),
+                )
+                .unwrap();
+            test.gpu_search_context.run_context().unwrap();
+            let mut gpu_responses = vec![ScoredPointOffset::default(); requests.len() * ef];
+            test.gpu_search_context
+                .download_staging_buffer
+                .download_slice(&mut gpu_responses, 0)
+                .unwrap();
+            gpu_responses
+                .chunks(ef)
+                .map(|r| {
+                    r.iter()
+                        .take_while(|s| s.idx != PointOffsetType::MAX)
+                        .cloned()
+                        .collect_vec()
+                })
+                .collect_vec()
+        };
+
+        let gpu_responses_1 = search(&search_requests);
 
         // restart search to check reset
-        let gpu_responses_2 = test.gpu_search_context.search(&search_requests).unwrap();
+        let gpu_responses_2 = search(&search_requests);
 
         // Check response
         for i in 0..groups_count {
