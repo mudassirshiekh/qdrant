@@ -54,7 +54,7 @@ pub fn build_hnsw_on_gpu<'a>(
         m,
         m0,
         ef,
-        num_vectors,
+        32 * 1024 * 1024 / m0,
         force_half_precision,
         exact,
         1..32,

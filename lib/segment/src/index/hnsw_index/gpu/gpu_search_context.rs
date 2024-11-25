@@ -88,21 +88,11 @@ impl ShaderBuilderParameters for GpuSearchContextParams {
     }
 }
 
-struct GpuSearchContextGroupAllocation {
-    groups_count: usize,
-    gpu_visited_flags: GpuVisitedFlags,
-    upload_staging_buffer: Arc<gpu::Buffer>,
-    download_staging_buffer: Arc<gpu::Buffer>,
-    requests_buffer: Arc<gpu::Buffer>,
-    responses_buffer: Arc<gpu::Buffer>,
-    insert_atomics_buffer: Arc<gpu::Buffer>,
-}
-
 impl GpuSearchContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: Arc<gpu::Device>,
-        max_groups_count: usize,
+        groups_count: usize,
         vector_storage: &VectorStorageEnum,
         quantized_storage: Option<&QuantizedVectors>,
         points_remap: &[PointOffsetType],
@@ -127,25 +117,45 @@ impl GpuSearchContext {
         )?;
         let gpu_links = GpuLinks::new(device.clone(), m, m0, points_count, max_patched_points)?;
 
-        let allocation_timer = std::time::Instant::now();
-        let GpuSearchContextGroupAllocation {
-            groups_count,
-            gpu_visited_flags,
-            upload_staging_buffer,
-            download_staging_buffer,
-            requests_buffer,
-            responses_buffer,
-            insert_atomics_buffer,
-        } = Self::allocate_grouped_data(
+        let requests_buffer = gpu::Buffer::new(
             device.clone(),
-            max_groups_count,
+            "Search requests buffer",
+            gpu::BufferType::Storage,
+            groups_count * std::mem::size_of::<GpuRequest>(),
+        )?;
+        let responses_buffer = gpu::Buffer::new(
+            device.clone(),
+            "Search responses buffer",
+            gpu::BufferType::Storage,
+            groups_count * std::mem::size_of::<PointOffsetType>(),
+        )?;
+
+        let upload_staging_buffer = gpu::Buffer::new(
+            device.clone(),
+            "Search context upload staging buffer",
+            gpu::BufferType::CpuToGpu,
+            requests_buffer.size(),
+        )?;
+        let download_staging_buffer = gpu::Buffer::new(
+            device.clone(),
+            "Search context download staging buffer",
+            gpu::BufferType::GpuToCpu,
+            responses_buffer.size(),
+        )?;
+
+        let insert_atomics_buffer = gpu::Buffer::new(
+            device.clone(),
+            "Insert atomics buffer",
+            gpu::BufferType::Storage,
+            points_remap.len() * std::mem::size_of::<PointOffsetType>(),
+        )?;
+
+        let gpu_visited_flags = GpuVisitedFlags::new(
+            device.clone(),
+            groups_count,
             points_remap,
             visited_flags_factor_range,
         )?;
-        log::debug!(
-            "GPU groups count = {groups_count} (max = {max_groups_count}), allocation time: {:?}",
-            allocation_timer.elapsed()
-        );
 
         let greedy_search_shader = ShaderBuilder::new(device.clone())
             .with_shader_code(include_str!("shaders/run_greedy_search.comp"))
@@ -230,87 +240,6 @@ impl GpuSearchContext {
             patches_count: 0,
             exact,
             ef,
-        })
-    }
-
-    fn allocate_grouped_data(
-        device: Arc<gpu::Device>,
-        max_groups_count: usize,
-        points_remap: &[PointOffsetType],
-        visited_flags_factor_range: std::ops::Range<usize>,
-    ) -> gpu::GpuResult<GpuSearchContextGroupAllocation> {
-        let mut visited_flags_factor = 1.0;
-        // TODO(gpu): move 32 to config
-        while visited_flags_factor < 32.0 {
-            // TODO(gpu): decrease only gpu visited flags
-            // TODO(gpu): restart only if OOM, for other errors return an error
-            if let Ok(alloc) = Self::try_allocate_grouped_data(
-                device.clone(),
-                max_groups_count,
-                points_remap,
-                visited_flags_factor_range.clone(),
-            ) {
-                return Ok(alloc);
-            }
-            visited_flags_factor *= 1.5;
-        }
-        panic!("Failed to allocate gpu data")
-    }
-
-    fn try_allocate_grouped_data(
-        device: Arc<gpu::Device>,
-        groups_count: usize,
-        points_remap: &[PointOffsetType],
-        visited_flags_factor_range: std::ops::Range<usize>,
-    ) -> OperationResult<GpuSearchContextGroupAllocation> {
-        let requests_buffer = gpu::Buffer::new(
-            device.clone(),
-            "Search requests buffer",
-            gpu::BufferType::Storage,
-            groups_count * std::mem::size_of::<GpuRequest>(),
-        )?;
-        let responses_buffer = gpu::Buffer::new(
-            device.clone(),
-            "Search responses buffer",
-            gpu::BufferType::Storage,
-            groups_count * std::mem::size_of::<PointOffsetType>(),
-        )?;
-
-        let gpu_visited_flags = GpuVisitedFlags::new(
-            device.clone(),
-            groups_count,
-            points_remap,
-            visited_flags_factor_range,
-        )?;
-
-        let upload_staging_buffer = gpu::Buffer::new(
-            device.clone(),
-            "Search context upload staging buffer",
-            gpu::BufferType::CpuToGpu,
-            requests_buffer.size(),
-        )?;
-        let download_staging_buffer = gpu::Buffer::new(
-            device.clone(),
-            "Search context download staging buffer",
-            gpu::BufferType::GpuToCpu,
-            responses_buffer.size(),
-        )?;
-
-        let insert_atomics_buffer = gpu::Buffer::new(
-            device.clone(),
-            "Insert atomics buffer",
-            gpu::BufferType::Storage,
-            points_remap.len() * std::mem::size_of::<PointOffsetType>(),
-        )?;
-
-        Ok(GpuSearchContextGroupAllocation {
-            groups_count,
-            gpu_visited_flags,
-            upload_staging_buffer,
-            download_staging_buffer,
-            requests_buffer,
-            responses_buffer,
-            insert_atomics_buffer,
         })
     }
 
