@@ -96,6 +96,7 @@ mod tests {
     use std::borrow::Borrow;
 
     use common::types::PointOffsetType;
+    use rstest::rstest;
 
     use super::*;
     use crate::index::hnsw_index::gpu::batched_points::BatchedPoints;
@@ -107,7 +108,11 @@ mod tests {
     use crate::index::hnsw_index::graph_layers::GraphLayersBase;
     use crate::index::hnsw_index::graph_layers_builder::GraphLayersBuilder;
 
-    fn build_gpu_graph(test: &GpuGraphTestData, groups_count: usize) -> GraphLayersBuilder {
+    fn build_gpu_graph(
+        test: &GpuGraphTestData,
+        groups_count: usize,
+        visited_flags_factor: usize,
+    ) -> GraphLayersBuilder {
         let num_vectors = test.graph_layers_builder.links_layers.len();
         let m = test.graph_layers_builder.m;
         let m0 = test.graph_layers_builder.m0;
@@ -132,12 +137,14 @@ mod tests {
             groups_count,
             &test.vector_storage.borrow(),
             None,
+            &batched_points.remap,
             m,
             m0,
             ef,
             num_vectors,
             false,
             true,
+            visited_flags_factor..32,
             &false.into(),
         )
         .unwrap();
@@ -170,13 +177,13 @@ mod tests {
         let ef = 32;
 
         let test = create_gpu_graph_test_data(num_vectors, dim, m, m0, ef, 0);
-        let graph_layers_builder = build_gpu_graph(&test, 1);
+        let graph_layers_builder = build_gpu_graph(&test, 1, 1);
 
         compare_graph_layers_builders(&test.graph_layers_builder, &graph_layers_builder);
     }
 
-    #[test]
-    fn test_gpu_hnsw_level_quality() {
+    #[rstest]
+    fn test_gpu_hnsw_level_quality(#[values(1, 2)] visited_flags_factor: usize) {
         let _ = env_logger::builder()
             .is_test(true)
             .filter_level(log::LevelFilter::Trace)
@@ -192,7 +199,7 @@ mod tests {
         let top = 10;
 
         let test = create_gpu_graph_test_data(num_vectors, dim, m, m0, ef, searches_count);
-        let graph_layers_builder = build_gpu_graph(&test, groups_count);
+        let graph_layers_builder = build_gpu_graph(&test, groups_count, visited_flags_factor);
 
         check_graph_layers_builders_quality(graph_layers_builder, test, top, ef, 0.8)
     }

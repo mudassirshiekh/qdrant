@@ -18,10 +18,10 @@ buffer VisitedFlagsBuffer {
     uint8_t data[];
 } visited_flags;
 
-#if VISITED_FLAGS_REMAP
+#ifdef VISITED_FLAGS_REMAP
 layout(set = VISITED_FLAGS_LAYOUT_SET, binding = 2)
 buffer VisitedFlagsRemapBuffer {
-    uint data[];
+    POINT_ID data[];
 } visited_flags_remap;
 #endif
 
@@ -29,7 +29,7 @@ buffer VisitedFlagsRemapBuffer {
 #define VISITED_GENERATION visited_flags_params.generation
 
 bool check_visited(POINT_ID point_id) {
-    #if VISITED_FLAGS_REMAP
+    #ifdef VISITED_FLAGS_REMAP
     point_id = visited_flags_remap.data[point_id];
     #endif
 

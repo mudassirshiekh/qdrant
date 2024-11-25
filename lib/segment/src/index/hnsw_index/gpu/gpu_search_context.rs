@@ -3,7 +3,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use common::types::PointOffsetType;
-use itertools::Itertools;
 
 use super::gpu_links::GpuLinks;
 use super::gpu_vector_storage::GpuVectorStorage;
@@ -106,12 +105,14 @@ impl GpuSearchContext {
         max_groups_count: usize,
         vector_storage: &VectorStorageEnum,
         quantized_storage: Option<&QuantizedVectors>,
+        points_remap: &[PointOffsetType],
         m: usize,
         m0: usize,
         ef: usize,
         max_patched_points: usize,
         force_half_precision: bool,
         exact: bool,
+        visited_flags_factor_range: std::ops::Range<usize>,
         stopped: &AtomicBool,
     ) -> OperationResult<Self> {
         let points_count = vector_storage.total_vector_count();
@@ -135,8 +136,12 @@ impl GpuSearchContext {
             requests_buffer,
             responses_buffer,
             insert_atomics_buffer,
-        } = Self::allocate_grouped_data(device.clone(), max_groups_count, points_count)
-            .map_err(|_| OperationError::service_error("Failed to allocate gpu data"))?;
+        } = Self::allocate_grouped_data(
+            device.clone(),
+            max_groups_count,
+            points_remap,
+            visited_flags_factor_range,
+        )?;
         log::debug!(
             "GPU groups count = {groups_count} (max = {max_groups_count}), allocation time: {:?}",
             allocation_timer.elapsed()
@@ -231,7 +236,8 @@ impl GpuSearchContext {
     fn allocate_grouped_data(
         device: Arc<gpu::Device>,
         max_groups_count: usize,
-        points_count: usize,
+        points_remap: &[PointOffsetType],
+        visited_flags_factor_range: std::ops::Range<usize>,
     ) -> gpu::GpuResult<GpuSearchContextGroupAllocation> {
         let mut visited_flags_factor = 1.0;
         // TODO(gpu): move 32 to config
@@ -241,8 +247,8 @@ impl GpuSearchContext {
             if let Ok(alloc) = Self::try_allocate_grouped_data(
                 device.clone(),
                 max_groups_count,
-                points_count,
-                visited_flags_factor,
+                points_remap,
+                visited_flags_factor_range.clone(),
             ) {
                 return Ok(alloc);
             }
@@ -254,8 +260,8 @@ impl GpuSearchContext {
     fn try_allocate_grouped_data(
         device: Arc<gpu::Device>,
         groups_count: usize,
-        points_count: usize,
-        visited_flags_factor: f32,
+        points_remap: &[PointOffsetType],
+        visited_flags_factor_range: std::ops::Range<usize>,
     ) -> OperationResult<GpuSearchContextGroupAllocation> {
         let requests_buffer = gpu::Buffer::new(
             device.clone(),
@@ -270,11 +276,12 @@ impl GpuSearchContext {
             groups_count * std::mem::size_of::<PointOffsetType>(),
         )?;
 
-        // TODO(gpu): use true remap
-        let remap =
-            (0..(points_count as f32 / visited_flags_factor) as PointOffsetType).collect_vec();
-        let gpu_visited_flags =
-            GpuVisitedFlags::new(device.clone(), groups_count, remap.as_slice())?;
+        let gpu_visited_flags = GpuVisitedFlags::new(
+            device.clone(),
+            groups_count,
+            points_remap,
+            visited_flags_factor_range,
+        )?;
 
         let upload_staging_buffer = gpu::Buffer::new(
             device.clone(),
@@ -293,7 +300,7 @@ impl GpuSearchContext {
             device.clone(),
             "Insert atomics buffer",
             gpu::BufferType::Storage,
-            points_count * std::mem::size_of::<PointOffsetType>(),
+            points_remap.len() * std::mem::size_of::<PointOffsetType>(),
         )?;
 
         Ok(GpuSearchContextGroupAllocation {
@@ -540,6 +547,7 @@ mod tests {
                 .insert_vector(idx as PointOffsetType, v.as_vec_ref())
                 .unwrap();
         }
+        let point_ids = (0..(num_vectors + groups_count) as PointOffsetType).collect_vec();
 
         // Build HNSW index
         let mut graph_layers_builder = GraphLayersBuilder::new(num_vectors, m, m, ef, 1, true);
@@ -566,12 +574,14 @@ mod tests {
             groups_count,
             &storage,
             None,
+            &point_ids,
             m,
             m,
             ef,
             num_vectors,
             false,
             true,
+            1..32,
             &false.into(),
         )
         .unwrap();

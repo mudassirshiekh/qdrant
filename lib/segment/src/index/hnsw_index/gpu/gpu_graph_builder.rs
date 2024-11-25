@@ -39,24 +39,26 @@ pub fn build_hnsw_on_gpu<'a>(
     let m0 = reference_graph.m0;
     let ef = reference_graph.ef_construct;
 
+    let batched_points = BatchedPoints::new(
+        |point_id| reference_graph.get_point_level(point_id),
+        ids,
+        max_groups_count,
+    )?;
+
     let mut gpu_search_context = GpuSearchContext::new(
         device,
         max_groups_count,
         vector_storage,
         quantized_storage,
+        &batched_points.remap,
         m,
         m0,
         ef,
         num_vectors,
         force_half_precision,
         exact,
+        1..32,
         stopped,
-    )?;
-
-    let batched_points = BatchedPoints::new(
-        |point_id| reference_graph.get_point_level(point_id),
-        ids,
-        gpu_search_context.groups_count,
     )?;
 
     let graph_layers_builder =

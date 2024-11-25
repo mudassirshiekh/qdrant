@@ -27,6 +27,7 @@ pub struct BatchedPoints {
     pub ids_by_batches: Vec<HashSet<PointOffsetType>>,
     pub first_point_id: PointOffsetType,
     pub levels_count: usize,
+    pub remap: Vec<PointOffsetType>,
 }
 
 impl BatchedPoints {
@@ -36,6 +37,12 @@ impl BatchedPoints {
         groups_count: usize,
     ) -> OperationResult<Self> {
         Self::sort_points_by_level(&level_fn, &mut ids);
+
+        let mut remap = vec![0; ids.len()];
+        for (remapped_id, id) in ids.iter().enumerate() {
+            remap[*id as usize] = remapped_id as PointOffsetType;
+        }
+
         let first_point_id = ids.remove(0);
 
         let batches = Self::build_initial_batches(&level_fn, &ids, groups_count);
@@ -70,6 +77,7 @@ impl BatchedPoints {
             ids_by_batches,
             first_point_id,
             levels_count: level_fn(first_point_id) + 1,
+            remap,
         })
     }
 

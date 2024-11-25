@@ -5,7 +5,7 @@ use common::types::PointOffsetType;
 
 use super::shader_builder::ShaderBuilderParameters;
 use super::GPU_TIMEOUT;
-use crate::common::operation_error::OperationResult;
+use crate::common::operation_error::{OperationError, OperationResult};
 
 #[repr(C)]
 pub struct GpuVisitedFlagsParamsBuffer {
@@ -49,10 +49,8 @@ impl GpuVisitedFlags {
         device: Arc<gpu::Device>,
         groups_count: usize,
         points_remap: &[PointOffsetType],
+        factor_range: std::ops::Range<usize>,
     ) -> OperationResult<Self> {
-        let alignment = std::mem::size_of::<u32>();
-        let points_count = points_remap.len().next_multiple_of(alignment);
-
         let params_buffer = gpu::Buffer::new(
             device.clone(),
             "Visited flags params buffer",
@@ -66,8 +64,8 @@ impl GpuVisitedFlags {
             std::mem::size_of::<GpuVisitedFlagsParamsBuffer>(),
         )?;
 
-        let (visited_flags_buffer, remap_buffer) =
-            Self::create_flags_buffer(device.clone(), groups_count, points_count, points_remap)?;
+        let (visited_flags_buffer, remap_buffer, capacity) =
+            Self::create_flags_buffer(device.clone(), groups_count, points_remap, factor_range)?;
 
         let params = GpuVisitedFlagsParamsBuffer { generation: 1 };
         params_staging_buffer.upload(&params, 0)?;
@@ -107,7 +105,7 @@ impl GpuVisitedFlags {
             visited_flags_buffer,
             descriptor_set_layout,
             descriptor_set,
-            capacity: points_count,
+            capacity,
             remap: remap_buffer.is_some(),
         })
     }
@@ -142,15 +140,74 @@ impl GpuVisitedFlags {
     fn create_flags_buffer(
         device: Arc<gpu::Device>,
         groups_count: usize,
-        points_count: usize,
         points_remap: &[PointOffsetType],
-    ) -> OperationResult<(Arc<gpu::Buffer>, Option<Arc<gpu::Buffer>>)> {
-        let visited_flags_buffer = gpu::Buffer::new(
+        factor_range: std::ops::Range<usize>,
+    ) -> OperationResult<(Arc<gpu::Buffer>, Option<Arc<gpu::Buffer>>, usize)> {
+        let alignment = std::mem::size_of::<u32>();
+        let points_count = points_remap.len().next_multiple_of(alignment);
+        let flags_size = groups_count * points_count * std::mem::size_of::<u8>();
+
+        if flags_size < device.max_buffer_size() && factor_range.start == 1 {
+            let visited_flags_buffer_result = gpu::Buffer::new(
+                device.clone(),
+                "Visited flags buffer",
+                gpu::BufferType::Storage,
+                flags_size,
+            );
+            match visited_flags_buffer_result {
+                Ok(visited_flags_buffer) => return Ok((visited_flags_buffer, None, points_count)),
+                Err(gpu::GpuError::OutOfMemory) => {}
+                Err(e) => return Err(OperationError::from(e)),
+            }
+        }
+
+        let remap_buffer = gpu::Buffer::new(
             device.clone(),
-            "Visited flags buffer",
+            "Visited flags remap buffer",
             gpu::BufferType::Storage,
-            groups_count * points_count * std::mem::size_of::<u8>(),
+            points_remap.len() * std::mem::size_of::<PointOffsetType>(),
         )?;
-        Ok((visited_flags_buffer, None))
+        const UPLOAD_REMAP_BUFFER_COUNT: usize = 1024 * 1024;
+        let remap_staging_buffer = gpu::Buffer::new(
+            device.clone(),
+            "Visited flags remap staging buffer",
+            gpu::BufferType::CpuToGpu,
+            UPLOAD_REMAP_BUFFER_COUNT * std::mem::size_of::<PointOffsetType>(),
+        )?;
+        let mut context = gpu::Context::new(device.clone())?;
+        for chunk in points_remap.chunks(UPLOAD_REMAP_BUFFER_COUNT) {
+            remap_staging_buffer.upload_slice(chunk, 0)?;
+            context.copy_gpu_buffer(
+                remap_staging_buffer.clone(),
+                remap_buffer.clone(),
+                0,
+                0,
+                chunk.len() * std::mem::size_of::<PointOffsetType>(),
+            )?;
+            context.run()?;
+            context.wait_finish(GPU_TIMEOUT)?;
+        }
+
+        let mut factor = factor_range.start;
+        while factor < factor_range.end {
+            let capacity = points_count / factor;
+            if capacity < 4 {
+                break;
+            }
+
+            let flags_size = groups_count * capacity * std::mem::size_of::<u8>();
+            let visited_flags_buffer_result = gpu::Buffer::new(
+                device.clone(),
+                "Visited flags buffer",
+                gpu::BufferType::Storage,
+                flags_size,
+            );
+            if let Ok(visited_flags_buffer) = visited_flags_buffer_result {
+                return Ok((visited_flags_buffer, Some(remap_buffer), capacity));
+            }
+
+            factor *= 2;
+        }
+        Err(OperationError::from(gpu::GpuError::OutOfMemory))
     }
 }
