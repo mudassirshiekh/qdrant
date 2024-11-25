@@ -1,12 +1,19 @@
+/// For performance reasons, both [`BitWriter`] and [`BitReader`] use an
+/// intermediate buffer. Instead of writing/reading a single byte at a time,
+/// they write/read `size_of::<Buf>()` bytes at once.
+/// This is an implementation detail and shouldn't affect the data layout. Any
+/// unsigned numeric type larger than `u32` should work.
 type Buf = u64;
 
-pub struct BitPacker<'a> {
+/// Writes bits to `u8` vector.
+/// It's like [`std::io::Write`], but for bits rather than bytes.
+pub struct BitWriter<'a> {
     output: &'a mut Vec<u8>,
     buf: Buf,
     buf_bits: u8,
 }
 
-impl<'a> BitPacker<'a> {
+impl<'a> BitWriter<'a> {
     #[inline]
     pub fn new(output: &'a mut Vec<u8>) -> Self {
         output.clear();
@@ -16,66 +23,88 @@ impl<'a> BitPacker<'a> {
             buf_bits: 0,
         }
     }
+
+    /// Write a `value` of `bits` bits to the output.
+    ///
+    /// The `bits` must be less than or equal to 32, and the `value` must fit in
+    /// the `bits` bits.
     #[inline]
-    pub fn push(&mut self, value: u32, bits: u8) {
-        if self.buf_bits + bits >= Buf::BITS as u8 {
-            self.buf |= Buf::from(value) << self.buf_bits;
+    pub fn write(&mut self, value: u32, bits: u8) {
+        #[cfg(test)]
+        debug_assert!(bits <= 32 && u64::from(value) < 1 << bits);
+
+        self.buf |= Buf::from(value) << self.buf_bits;
+        self.buf_bits += bits;
+        if self.buf_bits >= Buf::BITS as u8 {
+            // 32 bits         0    64  buf_bits                    0
+            // |   |           |    |      |                        |
+            //  ....cccccvvvvvvv     .......bbbbbbbbbbbbbbbbbbbbbbbbb
+            //             value                     initial self.buf
+            //
+            //
+            //           bits+buf_bits
+            //                 |    64   buf_bits                   0
+            //                 |    |      |                        |
+            //                  cccccvvvvvvvbbbbbbbbbbbbbbbbbbbbbbbbb
+            //                  └[2]┘└─────────────[1]──────────────┘
+            //                            self.buf and value combined
+            //
+            // [1]: this part is already written to the output
+            // [2]: we need to put the remaining bits to the buffer
             self.output.extend_from_slice(&self.buf.to_le_bytes());
-            self.buf = Buf::from(value) >> (Buf::BITS as u8 - self.buf_bits);
-            self.buf_bits = self.buf_bits + bits - Buf::BITS as u8;
-        } else {
-            self.buf |= Buf::from(value) << self.buf_bits;
-            self.buf_bits += bits;
+            self.buf_bits -= Buf::BITS as u8;
+            self.buf = Buf::from(value) >> (bits - self.buf_bits);
         }
     }
 
+    /// Write the remaining bufferized bits to the output.
     #[inline]
     pub fn finish(self) {
         self.output.extend_from_slice(
-            &self.buf.to_le_bytes()[..(self.buf_bits as usize).div_ceil(size_of::<Buf>())],
+            &self.buf.to_le_bytes()[..(self.buf_bits as usize).div_ceil(u8::BITS as usize)],
         );
     }
 }
 
-pub struct BitUnpacker<'a> {
+/// Reads bits from `u8` slice.
+/// It's like [`std::io::Read`], but for bits rather than bytes.
+pub struct BitReader<'a> {
     input: &'a [u8],
     buf: Buf,
     buf_bits: u8,
-    bits: u8,
     mask: Buf,
+    bits: u8,
 }
 
-impl<'a> BitUnpacker<'a> {
+impl<'a> BitReader<'a> {
     #[inline]
     pub fn new(input: &'a [u8]) -> Self {
         Self {
             input,
             buf: 0,
             buf_bits: 0,
-            bits: 0,
             mask: 0,
+            bits: 0,
         }
     }
 
+    /// Configure the reader to read `bits` bits at a time. The subsequent calls
+    /// to [`BitReader::read()`] will read `bits` bits at a time.
     #[inline]
     pub fn set_bits(&mut self, bits: u8) {
         self.bits = bits;
-        self.mask = (1u64 << bits) - 1;
+        self.mask = (1 << bits) - 1;
     }
 
+    /// Read next `bits` bits from the input. The amount of bits must be set
+    /// with [`BitReader::set_bits()`] before calling this method.
+    ///
+    /// If read beyond the end of the input, the result would be an unspecified
+    /// garbage.
     #[inline]
     pub fn read(&mut self) -> u32 {
         if self.buf_bits < self.bits {
-            let mut new_bits;
-            if self.input.len() >= size_of::<Buf>() {
-                new_bits = Buf::from_le_bytes(self.input[0..size_of::<Buf>()].try_into().unwrap());
-                self.input = &self.input[size_of::<Buf>()..];
-            } else {
-                new_bits = 0;
-                for (i, byte) in self.input.iter().copied().enumerate() {
-                    new_bits |= Buf::from(byte) << (i * size_of::<Buf>());
-                }
-            }
+            let new_bits = read_buf_and_advance(&mut self.input);
             let val = ((self.buf | (new_bits << self.buf_bits)) & self.mask) as u32;
             self.buf = new_bits >> (self.bits - self.buf_bits);
             self.buf_bits += Buf::BITS as u8 - self.bits;
@@ -89,6 +118,29 @@ impl<'a> BitUnpacker<'a> {
     }
 }
 
+/// Read a single [`Buf`] from the `input` and advance (or not) the `input`.
+#[inline]
+fn read_buf_and_advance(input: &mut &[u8]) -> Buf {
+    let mut buf = 0;
+    if input.len() >= size_of::<Buf>() {
+        // This line translates to a single unaligned pointer read.
+        buf = Buf::from_le_bytes(input[0..size_of::<Buf>()].try_into().unwrap());
+        // This line translates to a single pointer advance.
+        *input = &input[size_of::<Buf>()..];
+    } else {
+        // We could remove this branch by explicitly using unsafe pointer
+        // operations in the branch above, but we are playing it safe here.
+        for (i, byte) in input.iter().copied().enumerate() {
+            buf |= Buf::from(byte) << (i * u8::BITS as usize);
+        }
+
+        // Don't advance the input for performance reasons: this should be the
+        // last read.
+        // *input = &[]; // Not needed.
+    }
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use std::iter::zip;
@@ -99,7 +151,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pack_unpack() {
+    fn test_bitpacking() {
         let mut rng = StdRng::seed_from_u64(42);
 
         let mut bits_per_value = Vec::new();
@@ -118,19 +170,19 @@ mod tests {
                     total_bits += u64::from(bits);
                 }
 
-                let mut packer = BitPacker::new(&mut packed);
+                let mut w = BitWriter::new(&mut packed);
                 for (&x, &bits) in zip(&values, &bits_per_value) {
-                    packer.push(x, bits);
+                    w.write(x, bits);
                 }
-                packer.finish();
+                w.finish();
 
                 assert_eq!(packed.len(), total_bits.next_multiple_of(8) as usize / 8);
 
                 unpacked.clear();
-                let mut unpacker = BitUnpacker::new(&packed);
+                let mut r = BitReader::new(&packed);
                 for &bits in &bits_per_value {
-                    unpacker.set_bits(bits);
-                    unpacked.push(unpacker.read());
+                    r.set_bits(bits);
+                    unpacked.push(r.read());
                 }
 
                 assert_eq!(values, unpacked);
