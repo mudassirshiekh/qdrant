@@ -30,7 +30,6 @@ pub struct GpuSearchContext {
     pub gpu_vector_storage: GpuVectorStorage,
     pub gpu_links: GpuLinks,
     pub gpu_visited_flags: GpuVisitedFlags,
-    pub is_dirty_links: bool,
 
     pub upload_staging_buffer: Arc<gpu::Buffer>,
     pub download_staging_buffer: Arc<gpu::Buffer>,
@@ -211,7 +210,6 @@ impl GpuSearchContext {
             device,
             context,
             groups_count,
-            is_dirty_links: false,
             upload_staging_buffer,
             download_staging_buffer,
             requests_buffer,
@@ -345,10 +343,6 @@ impl GpuSearchContext {
 
         let timer = std::time::Instant::now();
 
-        if self.is_dirty() {
-            self.apply_links_patch().unwrap();
-        }
-
         // upload requests
         self.upload_staging_buffer.upload_slice(requests, 0)?;
         self.context.copy_gpu_buffer(
@@ -407,9 +401,6 @@ impl GpuSearchContext {
 
         let timer = std::time::Instant::now();
 
-        if self.is_dirty() {
-            self.apply_links_patch().unwrap();
-        }
         self.gpu_visited_flags.clear(&mut self.context)?;
 
         // upload requests
@@ -459,15 +450,6 @@ impl GpuSearchContext {
         }
     }
 
-    pub fn set_links(
-        &mut self,
-        point_id: PointOffsetType,
-        links: &[PointOffsetType],
-    ) -> OperationResult<()> {
-        self.is_dirty_links = true;
-        self.gpu_links.set_links(point_id, links)
-    }
-
     pub fn upload_links(
         &mut self,
         level: usize,
@@ -493,20 +475,10 @@ impl GpuSearchContext {
         Ok(())
     }
 
-    pub fn apply_links_patch(&mut self) -> OperationResult<()> {
-        self.gpu_links.apply_gpu_patches(&mut self.context)?;
-        self.is_dirty_links = false;
-        Ok(())
-    }
-
     pub fn run_context(&mut self) -> OperationResult<()> {
         self.context.run()?;
         self.context.wait_finish(GPU_TIMEOUT)?;
         Ok(())
-    }
-
-    fn is_dirty(&self) -> bool {
-        self.is_dirty_links
     }
 }
 
@@ -604,14 +576,9 @@ mod tests {
         )
         .unwrap();
 
-        // Upload HNSW links to GPU
-        for idx in 0..(num_vectors as PointOffsetType) {
-            let mut links = vec![];
-            graph_layers_builder.links_map(idx, 0, |link| links.push(link));
-            gpu_search_context.set_links(idx, &links).unwrap();
-        }
-        gpu_search_context.apply_links_patch().unwrap();
-        gpu_search_context.run_context().unwrap();
+        gpu_search_context
+            .upload_links(0, &graph_layers_builder)
+            .unwrap();
 
         TestData {
             gpu_search_context,

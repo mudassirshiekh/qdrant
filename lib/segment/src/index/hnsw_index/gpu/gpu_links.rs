@@ -147,7 +147,7 @@ impl GpuLinks {
         Ok(())
     }
 
-    pub fn apply_gpu_patches(&mut self, gpu_context: &mut gpu::Context) -> OperationResult<()> {
+    fn apply_gpu_patches(&mut self, gpu_context: &mut gpu::Context) -> OperationResult<()> {
         for (i, &(patched_point_id, patched_links_count)) in self.patched_points.iter().enumerate()
         {
             let patch_start_index =
@@ -168,7 +168,7 @@ impl GpuLinks {
         Ok(())
     }
 
-    pub fn set_links(
+    fn set_links(
         &mut self,
         point_id: PointOffsetType,
         links: &[PointOffsetType],
