@@ -16,31 +16,24 @@ struct GpuLinksParamsBuffer {
 }
 
 pub struct GpuLinks {
-    pub m: usize,
-    pub links_capacity: usize,
-    pub points_count: usize,
-    pub max_patched_points: usize,
-    pub device: Arc<gpu::Device>,
-    pub links_buffer: Arc<gpu::Buffer>,
-    pub params_buffer: Arc<gpu::Buffer>,
-    pub patch_buffer: Arc<gpu::Buffer>,
-    pub patched_points: Vec<(PointOffsetType, usize)>,
-    pub descriptor_set_layout: Arc<gpu::DescriptorSetLayout>,
-    pub descriptor_set: Arc<gpu::DescriptorSet>,
+    m: usize,
+    links_capacity: usize,
+    max_patched_points: usize,
+    device: Arc<gpu::Device>,
+    links_buffer: Arc<gpu::Buffer>,
+    params_buffer: Arc<gpu::Buffer>,
+    patch_buffer: Arc<gpu::Buffer>,
+    patched_points: Vec<(PointOffsetType, usize)>,
+    descriptor_set_layout: Arc<gpu::DescriptorSetLayout>,
+    descriptor_set: Arc<gpu::DescriptorSet>,
 }
 
 impl ShaderBuilderParameters for GpuLinks {
     fn shader_includes(&self) -> HashMap<String, String> {
-        HashMap::from([
-            (
-                "iterators.comp".to_string(),
-                include_str!("shaders/iterators.comp").to_string(),
-            ),
-            (
-                "links.comp".to_string(),
-                include_str!("shaders/links.comp").to_string(),
-            ),
-        ])
+        HashMap::from([(
+            "links.comp".to_string(),
+            include_str!("shaders/links.comp").to_string(),
+        )])
     }
 
     fn shader_defines(&self) -> HashMap<String, Option<String>> {
@@ -113,7 +106,6 @@ impl GpuLinks {
         Ok(Self {
             m,
             links_capacity,
-            points_count,
             max_patched_points,
             device,
             links_buffer,
@@ -294,5 +286,13 @@ impl GpuLinks {
             timer.elapsed()
         );
         Ok(())
+    }
+
+    pub fn descriptor_set_layout(&self) -> Arc<gpu::DescriptorSetLayout> {
+        self.descriptor_set_layout.clone()
+    }
+
+    pub fn descriptor_set(&self) -> Arc<gpu::DescriptorSet> {
+        self.descriptor_set.clone()
     }
 }

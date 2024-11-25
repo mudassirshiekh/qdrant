@@ -40,12 +40,7 @@ void main() {
 
     set_target(request.id);
     float entry_score = similarity(request.entry);
-#ifdef NO_EQUIVALENCY
-    ScoredPoint new_entry = greedy_search(request.id, ScoredPoint(request.entry, entry_score));
-    uint search_count = search(request.id, new_entry);
-#else
     uint search_count = search(request.id, ScoredPoint(request.entry, entry_score));
-#endif
     if (search_count == UINT_MAX) {
         // error while searching. propably candidates heap overflow
         return;
@@ -74,18 +69,16 @@ void main() {
 
     subgroupMemoryBarrier();
 
-    uint generation = VISITED_GENERATION;
-
     for (uint i = 0; i < count; i++) {
         uint other_id = GET_LINK(request.id, i);
 
-        bool is_changed = false;
-        if (subgroupElect()) {
-            uint other_atomic = atomicExchange(atomics.data[other_id], generation);
-            is_changed = other_atomic == generation;
+        bool is_locked = false;
+        if (gl_SubgroupInvocationID == 0) {
+            uint other_atomic = atomicExchange(atomics.data[other_id], 1);
+            is_locked = other_atomic == 1;
         }
-        if (subgroupAny(is_changed)) {
-            // other_id is already being processed by another subgroup
+        if (subgroupAny(is_locked)) {
+            // point is already being processed by another subgroup
             continue;
         }
 
@@ -98,10 +91,11 @@ void main() {
         } else {
             set_target(other_id);
             nearest_count = 0;
-            LINKS_FOREACH(other_id) {
+            for (uint j = 0; j < other_links_count; j++) {
+                POINT_ID link = GET_LINK(other_id, j);
                 shared_buffer[NEAREST_HEAP_OFFSET + nearest_count] = ScoredPoint(
-                    LINKS_FOREACH_VALUE,
-                    similarity(LINKS_FOREACH_VALUE)
+                    link,
+                    similarity(link)
                 );
                 nearest_count++;
             }
@@ -121,6 +115,10 @@ void main() {
             if (subgroupElect()) {
                 LINKS_SET_SIZE(other_id, other_new_links_count);
             }
+        }
+
+        if (gl_SubgroupInvocationID == 0) {
+            atomicExchange(atomics.data[other_id], 0);
         }
     }
 }

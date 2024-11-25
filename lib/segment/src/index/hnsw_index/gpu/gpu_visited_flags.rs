@@ -139,10 +139,6 @@ impl GpuVisitedFlags {
         self.descriptor_set.clone()
     }
 
-    pub fn generation(&self) -> u32 {
-        self.params.generation
-    }
-
     fn create_flags_buffer(
         device: Arc<gpu::Device>,
         groups_count: usize,
