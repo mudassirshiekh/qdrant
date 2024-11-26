@@ -34,6 +34,7 @@ Qdrant is also available as a fully managed **[Qdrant Cloud](https://cloud.qdran
 ## Getting Started
 
 ### Python
+## By Mudassir Alam
 
 ```
 pip install qdrant-client
