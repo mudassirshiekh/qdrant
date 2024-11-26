@@ -391,7 +391,11 @@ impl SegmentBuilder {
         Ok(true)
     }
 
-    pub fn build(self, permit: CpuPermit, stopped: &AtomicBool) -> Result<Segment, OperationError> {
+    pub fn build(
+        self,
+        mut permit: CpuPermit,
+        stopped: &AtomicBool,
+    ) -> Result<Segment, OperationError> {
         let (temp_dir, destination_path) = {
             let SegmentBuilder {
                 version,
@@ -430,19 +434,18 @@ impl SegmentBuilder {
             let gpu_device = if crate::index::hnsw_index::gpu::get_gpu_indexing() {
                 crate::index::hnsw_index::gpu::GPU_DEVICES_MANAGER
                     .as_ref()
-                    .map(|devices_manager| devices_manager.lock_device())
                     .ok()
+                    .map(|devices_manager| devices_manager.lock_device(stopped))
+                    .transpose()?
                     .flatten()
             } else {
                 None
             };
-            /*
             if let Some(_gpu_device) = &gpu_device {
                 if permit.num_cpus > 1 {
                     permit.release_count(permit.num_cpus - 1);
                 }
             }
-             */
 
             // Arc permit to share it with each vector store
             let permit = Arc::new(permit);

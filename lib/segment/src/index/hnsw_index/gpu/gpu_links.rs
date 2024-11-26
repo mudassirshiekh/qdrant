@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use common::types::PointOffsetType;
 
 use super::shader_builder::ShaderBuilderParameters;
+use crate::common::check_stopped;
 use crate::common::operation_error::{OperationError, OperationResult};
 use crate::index::hnsw_index::gpu::GPU_TIMEOUT;
 use crate::index::hnsw_index::graph_layers::GraphLayersBase;
@@ -194,6 +196,7 @@ impl GpuLinks {
         level: usize,
         graph_layers_builder: &GraphLayersBuilder,
         context: &mut gpu::Context,
+        stopped: &AtomicBool,
     ) -> OperationResult<()> {
         self.update_params(context, graph_layers_builder.get_m(level))?;
         self.clear(context)?;
@@ -213,6 +216,8 @@ impl GpuLinks {
             .collect();
 
         for points_slice in points.chunks(self.max_patched_points) {
+            check_stopped(stopped)?;
+
             for &point_id in points_slice {
                 let links = graph_layers_builder.links_layers[point_id][level].read();
                 self.set_links(point_id as PointOffsetType, &links)?;
@@ -231,6 +236,7 @@ impl GpuLinks {
         level: usize,
         graph_layers_builder: &GraphLayersBuilder,
         context: &mut gpu::Context,
+        stopped: &AtomicBool,
     ) -> OperationResult<()> {
         let timer = std::time::Instant::now();
 
@@ -242,14 +248,15 @@ impl GpuLinks {
             "Download links staging buffer",
             gpu::BufferType::GpuToCpu,
             links_patch_capacity,
-        )
-        .unwrap();
+        )?;
 
         let points = (0..graph_layers_builder.links_layers.len() as PointOffsetType)
             .filter(|&point_id| graph_layers_builder.get_point_level(point_id) >= level)
             .collect::<Vec<_>>();
 
         for chunk_index in 0..points.len().div_ceil(self.max_patched_points) {
+            check_stopped(stopped)?;
+
             let start = chunk_index * self.max_patched_points;
             let end = (start + self.max_patched_points).min(points.len());
             let chunk_size = end - start;

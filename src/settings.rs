@@ -163,6 +163,10 @@ pub struct GpuConfig {
     pub wait_free: Option<bool>,
     #[serde(default)]
     pub parallel_indexes: Option<usize>,
+    #[serde(default)]
+    pub allow_integrated: bool,
+    #[serde(default)]
+    pub allow_emulated: bool,
 }
 
 #[derive(Debug, Deserialize, Clone, Validate)]

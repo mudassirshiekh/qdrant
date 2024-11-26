@@ -1,7 +1,9 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, MutexGuard};
 
+use crate::common::check_stopped;
 use crate::common::operation_error::OperationResult;
 
 pub struct DevicesMaganer {
@@ -19,10 +21,16 @@ impl DevicesMaganer {
         filter: &str,
         start_index: usize,
         count: usize,
+        allow_integrated: bool,
+        allow_emulated: bool,
         wait_free: bool,
         parallel_indexes: usize,
     ) -> OperationResult<Self> {
         let filter = filter.to_lowercase();
+        let filter = filter
+            .split(",")
+            .map(|s| s.trim().to_owned())
+            .collect::<Vec<_>>();
         let mut devices = Vec::new();
         for queue_index in 0..parallel_indexes {
             devices.extend(
@@ -31,7 +39,14 @@ impl DevicesMaganer {
                     .iter()
                     .filter(|device| {
                         let device_name = device.name.to_lowercase();
-                        device_name.contains(&filter)
+                        filter.iter().any(|filter| device_name.contains(filter))
+                    })
+                    .filter(|device| {
+                        device.device_type == gpu::PhysicalDeviceType::Discrete
+                            || (allow_integrated
+                                && device.device_type == gpu::PhysicalDeviceType::Integrated)
+                            || (allow_emulated
+                                && device.device_type == gpu::PhysicalDeviceType::Other)
                     })
                     .skip(start_index)
                     .take(count)
@@ -60,25 +75,25 @@ impl DevicesMaganer {
         Ok(Self { devices, wait_free })
     }
 
-    pub fn lock_device(&self) -> Option<LockedDevice> {
+    pub fn lock_device(&self, stopped: &AtomicBool) -> OperationResult<Option<LockedDevice>> {
         if self.devices.is_empty() {
-            return None;
+            return Ok(None);
         }
         loop {
-            // TODO(gpu): Add timeout
             for device in &self.devices {
                 if let Some(guard) = device.try_lock() {
-                    return Some(LockedDevice {
+                    return Ok(Some(LockedDevice {
                         locked_device: guard,
-                    });
+                    }));
                 }
             }
 
             if !self.wait_free {
-                return None;
+                return Ok(None);
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            check_stopped(stopped)?;
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
 }

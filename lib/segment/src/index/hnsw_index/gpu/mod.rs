@@ -41,6 +41,8 @@ static GPU_MIN_POINTS_COUNT: AtomicUsize = AtomicUsize::new(10_000);
 static GPU_DEVICE_START_INDEX: AtomicUsize = AtomicUsize::new(0);
 static GPU_DEVICES_COUNT: AtomicUsize = AtomicUsize::new(usize::MAX);
 static GPU_PARALLEL_INDEXES: AtomicUsize = AtomicUsize::new(0);
+static GPU_ALLOW_INTEGRATED: AtomicBool = AtomicBool::new(true);
+static GPU_ALLOW_EMULATED: AtomicBool = AtomicBool::new(true);
 
 fn create_gpu_instance() -> OperationResult<Arc<gpu::Instance>> {
     Ok(gpu::Instance::new(None, None, false)?)
@@ -49,12 +51,13 @@ fn create_gpu_instance() -> OperationResult<Arc<gpu::Instance>> {
 fn init_devices_manager() -> OperationResult<DevicesMaganer> {
     let instance = GPU_INSTANCE.clone()?;
     let filter = GPU_DEVICE_FILER.lock().clone();
-    // TODO(gpu): add start index and count
     let devices_manager = DevicesMaganer::new(
         instance,
         &filter,
         GPU_DEVICE_START_INDEX.load(Ordering::Relaxed),
         GPU_DEVICES_COUNT.load(Ordering::Relaxed),
+        GPU_ALLOW_INTEGRATED.load(Ordering::Relaxed),
+        GPU_ALLOW_EMULATED.load(Ordering::Relaxed),
         GPU_WAIT_FREE.load(Ordering::Relaxed),
         GPU_PARALLEL_INDEXES.load(Ordering::Relaxed),
     )?;
@@ -125,6 +128,14 @@ pub fn set_device_filter(device_filter: &str) {
 
 pub fn set_gpu_parallel_indexes(parallel_indexes: usize) {
     GPU_PARALLEL_INDEXES.store(parallel_indexes, Ordering::Relaxed);
+}
+
+pub fn set_allow_integrated(allow_integrated: bool) {
+    GPU_ALLOW_INTEGRATED.store(allow_integrated, Ordering::Relaxed);
+}
+
+pub fn set_allow_emulated(allow_emulated: bool) {
+    GPU_ALLOW_EMULATED.store(allow_emulated, Ordering::Relaxed);
 }
 
 pub fn get_gpu_min_points_count() -> usize {

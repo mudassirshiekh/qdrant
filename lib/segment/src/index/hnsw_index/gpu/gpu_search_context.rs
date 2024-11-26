@@ -390,18 +390,20 @@ impl GpuSearchContext {
         &mut self,
         level: usize,
         graph_layers_builder: &GraphLayersBuilder,
+        stopped: &AtomicBool,
     ) -> OperationResult<()> {
         self.gpu_links
-            .upload_links(level, graph_layers_builder, &mut self.context)
+            .upload_links(level, graph_layers_builder, &mut self.context, stopped)
     }
 
     pub fn download_links(
         &mut self,
         level: usize,
         graph_layers_builder: &GraphLayersBuilder,
+        stopped: &AtomicBool,
     ) -> OperationResult<()> {
         self.gpu_links
-            .download_links(level, graph_layers_builder, &mut self.context)
+            .download_links(level, graph_layers_builder, &mut self.context, stopped)
     }
 
     pub fn clear(&mut self, new_m: usize) -> OperationResult<()> {
@@ -516,7 +518,7 @@ mod tests {
         .unwrap();
 
         gpu_search_context
-            .upload_links(0, &graph_layers_builder)
+            .upload_links(0, &graph_layers_builder, &false.into())
             .unwrap();
 
         TestData {

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use common::types::PointOffsetType;
 
+use crate::common::check_stopped;
 use crate::common::operation_error::OperationResult;
 use crate::index::hnsw_index::gpu::batched_points::BatchedPoints;
 use crate::index::hnsw_index::gpu::create_graph_layers_builder;
@@ -13,6 +14,9 @@ use crate::index::hnsw_index::point_scorer::FilteredScorer;
 use crate::payload_storage::FilterContext;
 use crate::vector_storage::quantized::quantized_vectors::QuantizedVectors;
 use crate::vector_storage::{RawScorer, VectorStorageEnum};
+
+/// Maximum count of point IDs per visited flag.
+static MAX_VISITED_FLAGS_FACTOR: usize = 32;
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_hnsw_on_gpu<'a>(
@@ -37,7 +41,7 @@ pub fn build_hnsw_on_gpu<'a>(
     let num_vectors = reference_graph.links_layers.len();
     let m = reference_graph.m;
     let m0 = reference_graph.m0;
-    let ef = reference_graph.ef_construct;
+    let ef = std::cmp::max(reference_graph.ef_construct, m0);
 
     let batched_points = BatchedPoints::new(
         |point_id| reference_graph.get_point_level(point_id),
@@ -57,7 +61,7 @@ pub fn build_hnsw_on_gpu<'a>(
         32 * 1024 * 1024 / m0,
         force_half_precision,
         exact,
-        1..32,
+        1..MAX_VISITED_FLAGS_FACTOR,
         stopped,
     )?;
 
@@ -65,6 +69,7 @@ pub fn build_hnsw_on_gpu<'a>(
         create_graph_layers_builder(&batched_points, num_vectors, m, m0, ef, entry_points_num)?;
 
     for i in 0..min_cpu_linked_points_count {
+        check_stopped(stopped)?;
         let point_id = batched_points.points[i].point_id;
         let (raw_scorer, filter_context) = points_scorer_builder(point_id)?;
         let points_scorer = FilteredScorer::new(raw_scorer.as_ref(), filter_context.as_deref());
@@ -75,14 +80,15 @@ pub fn build_hnsw_on_gpu<'a>(
     for level in (0..batched_points.levels_count).rev() {
         log::debug!("Starting GPU level {}", level,);
 
-        gpu_search_context.upload_links(level, &graph_layers_builder)?;
+        gpu_search_context.upload_links(level, &graph_layers_builder, stopped)?;
         build_level_on_gpu(
             &mut gpu_search_context,
             &batched_points,
             min_cpu_linked_points_count,
             level,
+            stopped,
         )?;
-        gpu_search_context.download_links(level, &graph_layers_builder)?;
+        gpu_search_context.download_links(level, &graph_layers_builder, stopped)?;
     }
 
     {

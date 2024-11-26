@@ -1,9 +1,10 @@
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::types::PointOffsetType;
 
 use super::batched_points::{Batch, BatchedPoints};
 use super::gpu_search_context::GpuSearchContext;
+use crate::common::check_stopped;
 use crate::common::operation_error::OperationResult;
 use crate::index::hnsw_index::gpu::gpu_search_context::GpuRequest;
 
@@ -13,10 +14,13 @@ pub fn build_level_on_gpu(
     batched_points: &BatchedPoints,
     skip_count: usize,
     level: usize,
+    stopped: &AtomicBool,
 ) -> OperationResult<()> {
     let mut prev_batch = None;
 
     for batch in batched_points.iter_batches(skip_count) {
+        check_stopped(stopped)?;
+
         if level > batch.level {
             gpu_batched_update_entries(gpu_search_context, &batch, prev_batch.as_ref())?;
         } else {
@@ -153,10 +157,17 @@ mod tests {
             let level_m = graph_layers_builder.get_m(level);
             gpu_search_context.clear(level_m).unwrap();
 
-            build_level_on_gpu(&mut gpu_search_context, &batched_points, 0, level).unwrap();
+            build_level_on_gpu(
+                &mut gpu_search_context,
+                &batched_points,
+                0,
+                level,
+                &false.into(),
+            )
+            .unwrap();
 
             gpu_search_context
-                .download_links(level, &graph_layers_builder)
+                .download_links(level, &graph_layers_builder, &false.into())
                 .unwrap();
         }
 

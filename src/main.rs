@@ -181,10 +181,12 @@ fn main() -> anyhow::Result<()> {
         segment::index::hnsw_index::gpu::set_gpu_parallel_indexes(
             settings_gpu.parallel_indexes.unwrap_or(1),
         );
+        segment::index::hnsw_index::gpu::set_allow_integrated(settings_gpu.allow_integrated);
+        segment::index::hnsw_index::gpu::set_allow_emulated(settings_gpu.allow_emulated);
         // initialize GPU devices
         let _ = segment::index::hnsw_index::gpu::GPU_DEVICES_MANAGER
             .as_ref()
-            .map(|devices_manager| devices_manager.lock_device());
+            .map(|devices_manager| devices_manager.lock_device(&false.into()));
     }
 
     welcome(&settings);
