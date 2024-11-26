@@ -22,7 +22,7 @@ static MAX_VISITED_FLAGS_FACTOR: usize = 32;
 pub fn build_hnsw_on_gpu<'a>(
     device: Arc<gpu::Device>,
     reference_graph: &GraphLayersBuilder,
-    max_groups_count: usize,
+    groups_count: usize,
     vector_storage: &VectorStorageEnum,
     quantized_storage: Option<&QuantizedVectors>,
     entry_points_num: usize,
@@ -46,15 +46,15 @@ pub fn build_hnsw_on_gpu<'a>(
     let batched_points = BatchedPoints::new(
         |point_id| reference_graph.get_point_level(point_id),
         ids,
-        max_groups_count,
+        groups_count,
     )?;
 
     let mut gpu_search_context = GpuSearchContext::new(
         device,
-        max_groups_count,
+        groups_count,
         vector_storage,
         quantized_storage,
-        &batched_points.remap,
+        batched_points.remap(),
         m,
         m0,
         ef,
@@ -70,14 +70,14 @@ pub fn build_hnsw_on_gpu<'a>(
 
     for i in 0..min_cpu_linked_points_count {
         check_stopped(stopped)?;
-        let point_id = batched_points.points[i].point_id;
+        let point_id = batched_points.points()[i].point_id;
         let (raw_scorer, filter_context) = points_scorer_builder(point_id)?;
         let points_scorer = FilteredScorer::new(raw_scorer.as_ref(), filter_context.as_deref());
         graph_layers_builder.link_new_point(point_id, points_scorer);
         raw_scorer.take_hardware_counter().discard_results();
     }
 
-    for level in (0..batched_points.levels_count).rev() {
+    for level in (0..batched_points.levels_count()).rev() {
         log::debug!("Starting GPU level {}", level,);
 
         gpu_search_context.upload_links(level, &graph_layers_builder, stopped)?;

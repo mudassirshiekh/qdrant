@@ -163,17 +163,17 @@ pub fn create_graph_layers_builder(
 
     // set first entry point
     graph_layers_builder.set_levels(
-        batched_points.first_point_id,
-        batched_points.levels_count - 1,
+        batched_points.first_point_id(),
+        batched_points.levels_count() - 1,
     );
     graph_layers_builder.entry_points.lock().new_point(
-        batched_points.first_point_id,
-        batched_points.levels_count - 1,
+        batched_points.first_point_id(),
+        batched_points.levels_count() - 1,
         |_| true,
     );
 
     // set levels
-    for linking_point in &batched_points.points {
+    for linking_point in batched_points.points() {
         graph_layers_builder.set_levels(linking_point.point_id, linking_point.level);
         let mut entry_points = graph_layers_builder.entry_points.lock();
         entry_points.new_point(linking_point.point_id, linking_point.level, |_| true);

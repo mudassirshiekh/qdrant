@@ -1,7 +1,6 @@
 use std::ops::Range;
 use std::sync::atomic::AtomicU32;
 
-use ahash::HashSet;
 use common::types::PointOffsetType;
 
 use crate::common::operation_error::OperationResult;
@@ -10,7 +9,6 @@ use crate::common::operation_error::OperationResult;
 pub struct PointLinkingData {
     pub point_id: PointOffsetType,
     pub level: usize,
-    pub batch_index: usize,
     pub entry: AtomicU32,
 }
 
@@ -18,16 +16,14 @@ pub struct PointLinkingData {
 pub struct Batch<'a> {
     pub points: &'a [PointLinkingData],
     pub level: usize,
-    pub end_index: usize,
 }
 
 pub struct BatchedPoints {
-    pub points: Vec<PointLinkingData>,
-    pub batches: Vec<Range<usize>>,
-    pub ids_by_batches: Vec<HashSet<PointOffsetType>>,
-    pub first_point_id: PointOffsetType,
-    pub levels_count: usize,
-    pub remap: Vec<PointOffsetType>,
+    points: Vec<PointLinkingData>,
+    batches: Vec<Range<usize>>,
+    first_point_id: PointOffsetType,
+    levels_count: usize,
+    remap: Vec<PointOffsetType>,
 }
 
 impl BatchedPoints {
@@ -48,45 +44,41 @@ impl BatchedPoints {
         let batches = Self::build_initial_batches(&level_fn, &ids, groups_count);
 
         let mut points = Vec::with_capacity(ids.len());
-        for (batch_index, batch) in batches.iter().enumerate() {
+        for batch in batches.iter() {
             for i in batch.clone() {
                 let point_id = ids[i];
                 let level = level_fn(point_id);
                 points.push(PointLinkingData {
                     point_id,
                     level,
-                    batch_index,
                     entry: first_point_id.into(),
                 });
             }
         }
 
-        let ids_by_batches = batches
-            .iter()
-            .map(|batch| {
-                batch
-                    .clone()
-                    .map(|i| ids[i])
-                    .collect::<HashSet<PointOffsetType>>()
-            })
-            .collect();
-
         Ok(Self {
             points,
             batches,
-            ids_by_batches,
             first_point_id,
             levels_count: level_fn(first_point_id) + 1,
             remap,
         })
     }
 
-    pub fn is_same_batch(
-        &self,
-        linking_point: &PointLinkingData,
-        other_point: PointOffsetType,
-    ) -> bool {
-        self.ids_by_batches[linking_point.batch_index].contains(&other_point)
+    pub fn first_point_id(&self) -> PointOffsetType {
+        self.first_point_id
+    }
+
+    pub fn levels_count(&self) -> usize {
+        self.levels_count
+    }
+
+    pub fn remap(&self) -> &[PointOffsetType] {
+        &self.remap
+    }
+
+    pub fn points(&self) -> &[PointLinkingData] {
+        &self.points
     }
 
     pub fn iter_batches(&self, skip_count: usize) -> impl Iterator<Item = Batch> {
@@ -97,7 +89,6 @@ impl BatchedPoints {
                 let intersected_batch = std::cmp::max(batch.start, skip_count)..batch.end;
                 let level = self.points[intersected_batch.start].level;
                 Batch {
-                    end_index: intersected_batch.end,
                     points: &self.points[intersected_batch],
                     level,
                 }

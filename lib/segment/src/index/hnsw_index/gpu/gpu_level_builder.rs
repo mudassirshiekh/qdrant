@@ -141,7 +141,7 @@ mod tests {
             groups_count,
             &test.vector_storage.borrow(),
             None,
-            &batched_points.remap,
+            batched_points.remap(),
             m,
             m0,
             ef,
@@ -153,7 +153,7 @@ mod tests {
         )
         .unwrap();
 
-        for level in (0..batched_points.levels_count).rev() {
+        for level in (0..batched_points.levels_count()).rev() {
             let level_m = graph_layers_builder.get_m(level);
             gpu_search_context.clear(level_m).unwrap();
 

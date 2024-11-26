@@ -8,8 +8,8 @@ use super::GPU_TIMEOUT;
 use crate::common::operation_error::{OperationError, OperationResult};
 
 #[repr(C)]
-pub struct GpuVisitedFlagsParamsBuffer {
-    pub generation: u32,
+struct GpuVisitedFlagsParamsBuffer {
+    generation: u32,
 }
 
 pub struct GpuVisitedFlags {
@@ -190,8 +190,8 @@ impl GpuVisitedFlags {
 
         let mut factor = factor_range.start;
         while factor < factor_range.end {
-            let capacity = points_count / factor;
-            if capacity < 4 {
+            let capacity = (points_count / factor).next_multiple_of(alignment);
+            if capacity == 0 {
                 break;
             }
 
